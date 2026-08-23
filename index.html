@@ -1,0 +1,1160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>R³DC — Knowing What to Revise · Reliability-Aware Depth Completion</title>
+<meta name="description" content="R³DC feeds per-pixel reliability into the affinity weights of a CSPN++ refiner, so confidence changes the depth map instead of annotating it. With RADI, a protocol measuring whether confidence is ranked, used, and calibrated.">
+<meta name="author" content="Noor Islam S. Mohammad, Uluğ Bayazıt">
+<meta name="citation_title" content="R3DC: Knowing What to Revise - Reliability-Aware Depth Completion for Trustworthy Cross-Domain Sparse Perception">
+<meta name="citation_author" content="Mohammad, Noor Islam S.">
+<meta name="citation_author" content="Bayazıt, Uluğ">
+<meta name="citation_publication_date" content="2026">
+<meta property="og:type" content="article">
+<meta property="og:title" content="R³DC: Knowing What to Revise">
+<meta property="og:description" content="Reliability as a control signal, not a read-out. Depth completion at 1.95–11.22 M parameters with per-pixel reliability that is evaluated, not asserted.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,300..700&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   R³DC — project page
+   Semantics drive the palette: teal is a trusted pixel, plum is a
+   doubted one. Every figure inherits these as custom properties,
+   so the inverted section re-themes without a second stylesheet.
+   ═══════════════════════════════════════════════════════════════ */
+:root{
+  --paper:#E7EAEE; --paper-hi:#F1F3F6; --paper-lo:#DDE1E7;
+  --ink:#11151B; --ink-soft:#4C5665; --ink-faint:#7A8492;
+  --rule:#C4CAD3; --rule-soft:#D5DAE1;
+  --trust:#0D6B63; --trust-tint:#D2E4E1; --trust-lo:#095049;
+  --doubt:#8C1F57; --doubt-tint:#EFD9E4;
+  --display:"Archivo",system-ui,sans-serif;
+  --body:"Source Serif 4",Georgia,serif;
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+  --gut:clamp(20px,5vw,68px); --maxw:1240px;
+  --s1:14.5px; --s2:16px; --s3:17.5px;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth;scroll-padding-top:72px}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--body);
+  font-size:var(--s3);line-height:1.62;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{animation-duration:.001ms!important;transition-duration:.001ms!important}}
+a{color:inherit}
+h1,h2,h3,h4{font-family:var(--display);font-weight:700;margin:0;line-height:1.06}
+p{margin:0 0 14px}
+.wrap{max-width:var(--maxw);margin:0 auto;padding-inline:var(--gut)}
+.eyebrow{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint)}
+.lede{font-size:clamp(18px,1.55vw,20.5px);line-height:1.56;color:var(--ink-soft);max-width:64ch}
+.small{font-size:var(--s1);line-height:1.6;color:var(--ink-soft)}
+.note{font-family:var(--mono);font-size:12px;line-height:1.62;color:var(--ink-faint)}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+em.k{font-style:normal;font-weight:600;color:var(--ink)}
+.maxc{max-width:66ch}
+
+/* ── rail ─────────────────────────────────────────────── */
+.rail{position:sticky;top:0;z-index:80;background:color-mix(in srgb,var(--paper) 92%,transparent);
+  backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--rule)}
+.progress{position:absolute;left:0;bottom:-1px;height:2px;background:var(--trust);width:0}
+.rail-in{display:flex;align-items:center;gap:20px;height:56px;max-width:var(--maxw);margin:0 auto;padding-inline:var(--gut)}
+.rail-mark{font-family:var(--display);font-variation-settings:"wdth" 118;font-weight:800;font-size:17px;letter-spacing:-.01em;white-space:nowrap;text-decoration:none}
+.rail-nav{display:flex;gap:4px;margin-left:auto;align-items:center;overflow-x:auto;scrollbar-width:none}
+.rail-nav::-webkit-scrollbar{display:none}
+.rail-nav a{font-family:var(--mono);font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;
+  text-decoration:none;color:var(--ink-faint);padding:6px 9px;border-radius:2px;white-space:nowrap;transition:.15s}
+.rail-nav a:hover{color:var(--ink);background:var(--paper-lo)}
+.rail-nav a[aria-current="true"]{color:var(--trust);background:var(--trust-tint)}
+.rail-cta{font-family:var(--mono);font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;text-decoration:none;
+  padding:7px 12px;background:var(--ink);color:var(--paper);border-radius:2px;white-space:nowrap}
+.rail-cta:hover{background:var(--trust)}
+@media (max-width:1080px){.rail-nav a.opt{display:none}}
+@media (max-width:640px){.rail-cta{display:none}}
+
+/* ── hero ─────────────────────────────────────────────── */
+.hero{padding:clamp(44px,6.4vw,84px) 0 clamp(30px,4vw,46px)}
+.venue{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:28px}
+.tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;
+  border:1px solid var(--rule);padding:5px 10px;border-radius:2px;color:var(--ink-soft);background:var(--paper-hi)}
+.tag.live{border-color:var(--trust);color:var(--trust);background:var(--trust-tint)}
+h1.title{font-variation-settings:"wdth" 108;font-size:clamp(36px,6.4vw,74px);font-weight:800;
+  letter-spacing:-.028em;max-width:16ch;margin-bottom:22px}
+h1.title .q{color:var(--doubt)}
+.subtitle{font-family:var(--display);font-variation-settings:"wdth" 94;font-weight:500;
+  font-size:clamp(16px,1.75vw,20px);color:var(--ink-soft);max-width:54ch;line-height:1.38;margin-bottom:30px}
+.byline{display:flex;flex-wrap:wrap;gap:4px 24px;align-items:baseline;margin-bottom:6px;font-size:17px}
+.byline a{text-decoration:none;border-bottom:1px solid var(--rule)}
+.byline a:hover{border-bottom-color:var(--trust)}
+.byline sup{font-family:var(--mono);font-size:10px;color:var(--ink-faint)}
+.affil{font-size:var(--s1);color:var(--ink-faint);margin-bottom:28px;max-width:70ch}
+.links{display:flex;flex-wrap:wrap;gap:9px;margin-bottom:38px}
+.btn{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12.5px;letter-spacing:.05em;
+  text-transform:uppercase;text-decoration:none;padding:11px 16px;border:1px solid var(--ink);border-radius:2px;
+  background:transparent;color:var(--ink);cursor:pointer;transition:background .16s,color .16s,border-color .16s}
+.btn:hover{background:var(--ink);color:var(--paper)}
+.btn.primary{background:var(--ink);color:var(--paper)}
+.btn.primary:hover{background:var(--trust);border-color:var(--trust)}
+:focus-visible{outline:2px solid var(--trust);outline-offset:3px}
+.plate{border-top:1px solid var(--ink);border-bottom:1px solid var(--rule);display:grid;
+  grid-template-columns:repeat(5,1fr);gap:1px;background:var(--rule-soft)}
+.plate div{background:var(--paper);padding:15px 16px 17px}
+.plate dt{font-family:var(--mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:6px}
+.plate dd{margin:0;font-family:var(--display);font-variation-settings:"wdth" 104;font-weight:700;font-size:19px;letter-spacing:-.012em}
+.plate dd span{font-size:11.5px;font-weight:500;color:var(--ink-soft);font-family:var(--mono);letter-spacing:0}
+@media (max-width:960px){.plate{grid-template-columns:repeat(2,1fr)}}
+
+/* ── sections ─────────────────────────────────────────── */
+.sec{padding:clamp(54px,6.6vw,92px) 0;border-top:1px solid var(--rule)}
+.sec-head{display:flex;align-items:baseline;gap:18px;margin-bottom:14px}
+.sec-head .mark{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--trust);white-space:nowrap;padding-top:7px;flex:none}
+h2{font-variation-settings:"wdth" 106;font-size:clamp(26px,3.3vw,40px);letter-spacing:-.022em;max-width:23ch}
+h3{font-variation-settings:"wdth" 100;font-size:19px;letter-spacing:-.012em;margin:0 0 9px}
+h4{font-variation-settings:"wdth" 100;font-size:15.5px;letter-spacing:-.005em;margin:0 0 6px}
+.cols{display:grid;grid-template-columns:1.02fr .98fr;gap:clamp(28px,3.4vw,54px);align-items:start}
+.cols.wide{grid-template-columns:1.35fr .65fr}
+.cols.narrow{grid-template-columns:.62fr 1.38fr}
+@media (max-width:980px){.cols,.cols.wide,.cols.narrow{grid-template-columns:1fr}}
+.band{background:var(--paper-hi)}
+.invert{--paper:#12161C;--paper-hi:#1A1F27;--paper-lo:#232932;--ink:#E9EDF2;--ink-soft:#A7B1BE;
+  --ink-faint:#828D9B;--rule:#2C333D;--rule-soft:#242A33;
+  --trust:#5FB8AE;--trust-tint:#16302E;--doubt:#E07BA8;--doubt-tint:#331A26;
+  background:var(--paper);color:var(--ink);border-top:none}
+.reveal{opacity:0;transform:translateY(10px);transition:opacity .5s ease,transform .5s ease}
+.reveal.in{opacity:1;transform:none}
+
+/* ── figures ──────────────────────────────────────────── */
+figure.fig{margin:30px 0 0;border:1px solid var(--rule);background:var(--paper-hi);border-radius:3px;overflow:hidden}
+figure.fig .plot{padding:clamp(12px,1.6vw,22px) clamp(10px,1.6vw,20px) 6px;background:var(--paper)}
+svg.chart{display:block;width:100%;height:auto}
+figcaption{border-top:1px solid var(--rule);padding:13px 18px 15px;font-size:14px;line-height:1.56;color:var(--ink-soft);background:var(--paper-hi)}
+figcaption b{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--trust);
+  font-weight:600;display:block;margin-bottom:4px}
+.fig-pair{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+@media (max-width:980px){.fig-pair{grid-template-columns:1fr}}
+
+/* ── tables ───────────────────────────────────────────── */
+.tbl{margin-top:32px}
+.tbl-cap{display:flex;justify-content:space-between;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:10px}
+.tbl-cap h3{margin:0}
+.tbl-cap .src{font-family:var(--mono);font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-faint)}
+.scroller{overflow-x:auto;border:1px solid var(--rule);background:var(--paper-hi);border-radius:3px}
+table{border-collapse:collapse;width:100%;min-width:620px}
+th,td{padding:9px 15px;text-align:right;border-bottom:1px solid var(--rule-soft);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);
+  font-weight:600;border-bottom:1px solid var(--ink);background:var(--paper)}
+tbody td{font-family:var(--mono);font-size:13.5px}
+tbody td:first-child{font-family:var(--body);font-size:16px}
+tbody tr:last-child td{border-bottom:none}
+tr.ours td{background:var(--trust-tint);font-weight:600}
+tr.ours td:first-child{box-shadow:inset 3px 0 0 var(--trust)}
+tr.zero td{color:var(--ink-faint)}
+td.best{color:var(--trust);font-weight:600}
+td.na{color:var(--ink-faint)}
+tr.grp td{background:var(--paper);font-family:var(--mono)!important;font-size:10.5px!important;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-faint);border-bottom:1px solid var(--rule)}
+.tfoot{font-family:var(--mono);font-size:11.5px;line-height:1.6;color:var(--ink-faint);margin-top:10px;max-width:82ch}
+
+/* ── equations & boxes ────────────────────────────────── */
+.eq{font-family:var(--mono);font-size:13.5px;line-height:1.95;background:var(--paper-hi);
+  border-left:2px solid var(--trust);padding:16px 18px;margin:20px 0;overflow-x:auto;border-radius:0 3px 3px 0}
+.eq .c{color:var(--ink-faint)}
+.eq .h{color:var(--trust);font-weight:600}
+.algo{border:1px solid var(--rule);background:var(--paper-hi);border-radius:3px;padding:18px 20px;font-family:var(--mono);
+  font-size:12.5px;line-height:1.85;overflow-x:auto}
+.algo .ln{color:var(--ink-faint);display:inline-block;width:22px}
+.algo .kw{color:var(--trust);font-weight:600}
+.callout{border:1px solid var(--doubt);background:var(--doubt-tint);padding:clamp(18px,2.2vw,26px);border-radius:3px}
+.callout .eyebrow{color:var(--doubt)}
+.quote{font-family:var(--display);font-variation-settings:"wdth" 96;font-weight:500;font-size:clamp(19px,2.1vw,25px);
+  line-height:1.35;letter-spacing:-.014em;color:var(--ink);border-left:3px solid var(--trust);padding-left:22px;margin:28px 0}
+
+/* ── cards & lists ────────────────────────────────────── */
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--rule-soft);border:1px solid var(--rule);margin-top:34px;border-radius:3px;overflow:hidden}
+.card{background:var(--paper);padding:20px 18px 22px}
+.card .k{font-family:var(--display);font-variation-settings:"wdth" 112;font-weight:800;font-size:15px;letter-spacing:.04em}
+.card .q{font-size:15px;line-height:1.45;color:var(--ink-soft);margin:9px 0 14px}
+.card .v{font-family:var(--mono);font-size:13px;color:var(--trust);font-weight:600}
+.card .f{font-family:var(--mono);font-size:11px;color:var(--ink-faint);line-height:1.5;margin-top:8px}
+@media (max-width:1020px){.cards{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:560px){.cards{grid-template-columns:1fr}}
+.list{list-style:none;padding:0;margin:22px 0 0}
+.list li{border-top:1px solid var(--rule-soft);padding:14px 0;display:grid;grid-template-columns:126px 1fr;gap:18px;align-items:baseline}
+.list li b{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);font-weight:600}
+.list li span{font-size:15.5px;line-height:1.56;color:var(--ink-soft)}
+@media (max-width:620px){.list li{grid-template-columns:1fr;gap:4px}}
+.contrib{counter-reset:c;display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--rule-soft);border:1px solid var(--rule);margin-top:30px;border-radius:3px;overflow:hidden}
+.contrib > div{background:var(--paper);padding:22px 22px 24px;counter-increment:c}
+.contrib > div::before{content:counter(c,decimal-leading-zero);font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--trust);display:block;margin-bottom:10px}
+@media (max-width:860px){.contrib{grid-template-columns:1fr}}
+
+/* ── gate demo ────────────────────────────────────────── */
+.gate{border:1px solid var(--ink);background:var(--paper-hi);padding:clamp(18px,2.2vw,26px);border-radius:3px}
+.gate-top{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.picker{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px}
+.picker button{font-family:var(--mono);font-size:11.5px;letter-spacing:.03em;padding:7px 10px;border:1px solid var(--rule);
+  background:var(--paper);color:var(--ink-soft);border-radius:2px;cursor:pointer;transition:.15s}
+.picker button:hover{border-color:var(--ink-soft);color:var(--ink)}
+.picker button[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--paper-hi)}
+.picker button[aria-pressed="true"][data-tone="bad"]{background:var(--doubt);border-color:var(--doubt);color:#fff}
+.picker button[aria-pressed="true"][data-tone="good"]{background:var(--trust);border-color:var(--trust);color:#fff}
+.field-wrap{position:relative}
+#field{display:block;width:100%;height:auto;border:1px solid var(--rule-soft);background:var(--paper)}
+.field-off{position:absolute;inset:0;display:grid;place-items:center;
+  background:repeating-linear-gradient(45deg,#D9DEE4 0 6px,#E7EAEE 6px 12px);
+  font-family:var(--mono);font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);
+  opacity:0;pointer-events:none;transition:opacity .2s}
+.field-off.on{opacity:1}
+.scale{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:10px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink-faint);margin:8px 0 18px}
+.scale i{flex:1;height:6px;background:linear-gradient(90deg,#8C1F57,#C08AA6,#DDE1E6,#79ADA8,#0D6B63)}
+.readout{border-top:1px solid var(--rule);padding-top:16px}
+.ro-row{display:flex;align-items:baseline;gap:12px;margin-bottom:11px}
+.ro-label{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-faint);width:74px;flex:none}
+.ro-val{font-family:var(--display);font-variation-settings:"wdth" 106;font-weight:700;font-size:27px;letter-spacing:-.02em}
+.ro-val small{font-family:var(--mono);font-size:12px;font-weight:400;color:var(--ink-soft);letter-spacing:0;margin-left:3px}
+.bar{position:relative;height:9px;background:var(--rule-soft);border-radius:1px;overflow:hidden;flex:1}
+.bar i{position:absolute;inset:0 auto 0 0;background:var(--ink);transition:width .38s cubic-bezier(.4,0,.2,1),background .25s}
+.bar i.good{background:var(--trust)} .bar i.bad{background:var(--doubt)}
+.gate-read{font-size:15px;line-height:1.55;color:var(--ink-soft);margin:14px 0 0;min-height:5.6em}
+.gate-read strong{color:var(--ink);font-weight:600}
+
+/* ── bibtex ───────────────────────────────────────────── */
+.bib{position:relative;background:#12161C;color:#D6DBE2;border-radius:3px;overflow:hidden;margin-top:22px}
+.bib pre{margin:0;padding:22px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.75}
+.bib .k{color:#7FBDB6}
+.copy{position:absolute;top:12px;right:12px;font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+  background:transparent;color:#8B96A5;border:1px solid #333B45;padding:6px 11px;border-radius:2px;cursor:pointer}
+.copy:hover{color:#fff;border-color:#5C6773}
+.copy.done{color:#7FBDB6;border-color:#7FBDB6}
+
+/* ── footer ───────────────────────────────────────────── */
+footer{border-top:1px solid var(--ink);padding:46px 0 64px;font-size:15px}
+.foot-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:30px}
+@media (max-width:820px){.foot-grid{grid-template-columns:1fr}}
+footer h4{font-family:var(--mono);font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;margin-bottom:10px}
+footer a{text-decoration:none;border-bottom:1px solid var(--rule)}
+footer a:hover{border-bottom-color:var(--trust)}
+.colophon{margin-top:40px;padding-top:18px;border-top:1px solid var(--rule-soft);font-family:var(--mono);font-size:11.5px;
+  color:var(--ink-faint);display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+@media print{
+  .rail,.picker,.copy{display:none}
+  body{background:#fff;font-size:10.5pt}
+  .sec{page-break-inside:avoid;border-top:1px solid #999}
+  .invert{--paper:#fff;--ink:#000;--ink-soft:#333;--ink-faint:#666;--rule:#bbb;--trust:#065F58;--doubt:#8C1F57;background:#fff;color:#000}
+}
+</style>
+</head>
+<body>
+
+<div class="rail">
+  <div class="rail-in">
+    <a class="rail-mark" href="#top">R³DC</a>
+    <nav class="rail-nav" id="nav">
+      <a href="#gate">The gate</a>
+      <a href="#contrib" class="opt">Contributions</a>
+      <a href="#method">Method</a>
+      <a href="#radi">RADI</a>
+      <a href="#results">Results</a>
+      <a href="#ablation" class="opt">Ablations</a>
+      <a href="#inversion">Negative result</a>
+      <a href="#limits" class="opt">Limits</a>
+      <a href="#cite">Cite</a>
+    </nav>
+    <a class="rail-cta" href="R3DC_RADI_Q1_JOURNAL_PR.pdf">PDF</a>
+  </div>
+  <div class="progress" id="progress"></div>
+</div>
+
+<!-- ══════════════ HERO ══════════════ -->
+<header class="hero" id="top">
+  <div class="wrap">
+    <div class="venue">
+      <span class="tag">Preprint · submitted to Elsevier</span>
+      <span class="tag live">CVPR 2026 Workshop · 3D Geometry Generation for Scientific Computing</span>
+      <span class="tag">Istanbul Technical University</span>
+    </div>
+
+    <h1 class="title">Knowing <span class="q">what</span> to revise.</h1>
+    <p class="subtitle">R³DC — Reliability-Aware Depth Completion for Trustworthy Cross-Domain Sparse Perception</p>
+
+    <div class="byline">
+      <span><a href="mailto:islam23@itu.edu.tr">Noor Islam S. Mohammad</a><sup>a,∗</sup></span>
+      <span><a href="mailto:ulugbayazit@itu.edu.tr">Uluğ Bayazıt</a><sup>b</sup></span>
+    </div>
+    <p class="affil"><sup>a</sup> Department of Computer Science &nbsp;·&nbsp; <sup>b</sup> Department of Computer Engineering &nbsp;·&nbsp; Istanbul Technical University, Sarıyer/Maslak 34467, Türkiye</p>
+
+    <div class="links">
+      <a class="btn primary" href="R3DC_RADI_Q1_JOURNAL_PR.pdf">Read the paper</a>
+      <a class="btn" href="https://openreview.net/forum?id=odj32HFuaj">OpenReview</a>
+      <a class="btn" href="https://github.com/yourusername/r3dc">Code &amp; configs</a>
+      <a class="btn" href="#radi">RADI protocol</a>
+      <a class="btn" href="#cite">BibTeX</a>
+    </div>
+
+    <dl class="plate">
+      <div><dt>Parameters</dt><dd>1.95<span>–11.22 M</span></dd></div>
+      <div><dt>Reliability cost</dt><dd>1<span>× forward pass</span></dd></div>
+      <div><dt>Latency · Tesla T4</dt><dd>50.4<span> ms · 19.8 fps</span></dd></div>
+      <div><dt>Sensing domains</dt><dd>4<span> · one unchanged recipe</span></dd></div>
+      <div><dt>Indoor adapter</dt><dd>16,642<span> trainable params</span></dd></div>
+    </dl>
+  </div>
+</header>
+
+<!-- ══════════════ TEASER · GATE ══════════════ -->
+<section class="sec" id="gate">
+  <div class="wrap">
+    <div class="sec-head"><span class="mark">§3 · §6</span>
+      <h2>Confidence the architecture ignores is confidence the system cannot act on.</h2>
+    </div>
+
+    <div class="cols" style="margin-top:24px">
+      <div>
+        <p class="lede">Per-pixel confidence is not new in depth completion. What is new here is that it is <em class="k">consumed</em>. The predicted reliability map <span class="num">R̂</span> is handed to the affinity network of a CSPN++ refiner, where it sets how strongly each pixel absorbs its neighbours across six propagation steps.</p>
+
+        <p class="small maxc" style="margin-top:18px">Nothing supervises <span class="num">R̂</span>. There are no reliability labels and no reliability loss. Its only gradient arrives through the cost of gating badly: trusting a pixel that is wrong lets the error propagate outward, and the refinement loss rises. The one configuration that minimises the loss is the one where reliability anti-correlates with the true error of the coarse estimate.</p>
+
+        <div class="eq">
+          <span class="h">w = 0.8 · softmax( AffNet([ u₁ ; R̂ ]) )</span> <span class="c">(Eq. 12)</span><br>
+          D<sup>(t+1)</sup>(p) = M<sub>s</sub> · d̃<sub>s</sub> + (1 − M<sub>s</sub>) · Σ<sub>i≠c</sub> w<sub>i</sub> D<sup>(t)</sup>(p + δ<sub>i</sub>) <span class="c">(Eq. 13)</span><br>
+          <span class="c">centre weight fixed at 0.2 · T = 6 iterations · anchors held as hard Dirichlet conditions</span>
+        </div>
+
+        <p class="small maxc">The panel opposite is the experiment that isolates the mechanism. One trained network, one coarse map <span class="num">D₀</span>, one propagation block. Only the gate changes. A uniform gate matches ungated propagation, so the extra input channel is worth nothing by itself. A spatially shuffled gate preserves the value distribution, destroys the correspondence, and lands <em class="k">worse than not gating at all</em>.</p>
+
+        <div class="eq" style="border-left-color:var(--ink)">
+          Δ<sub>gen</sub> = RMSE(D₀) − RMSE(B) = 0.051 m <span class="c">— any refiner would get this</span><br>
+          Δ<sub>rel</sub> = RMSE(B) − RMSE(E) = 0.020 m <span class="c">— attributable to the gate</span><br>
+          <span class="h">η<sub>rel</sub> = Δ<sub>rel</sub> / (Δ<sub>gen</sub> + Δ<sub>rel</sub>) ≈ 28%</span> <span class="c">(Eqs. 25–27)</span>
+        </div>
+        <p class="note maxc">Stated in that direction deliberately: the larger share of the refinement gain is generic. Gating contributes the smaller 0.020 m — still the difference between matching CSPN++ and matching PENet at 67× fewer parameters, but a 28% share, not a majority.</p>
+      </div>
+
+      <div class="gate">
+        <div class="gate-top">
+          <span class="eyebrow" style="color:var(--ink)">Gate substitution · interactive</span>
+          <span class="note">KITTI-uni, epoch 8 · Table 16</span>
+        </div>
+
+        <div class="picker" role="group" aria-label="Choose the gate supplied to the affinity network">
+          <button data-v="0" aria-pressed="false">A · Coarse D₀</button>
+          <button data-v="1" aria-pressed="false">B · Ungated</button>
+          <button data-v="2" aria-pressed="false">C · Uniform 0.5</button>
+          <button data-v="3" aria-pressed="false" data-tone="bad">D · Shuffled</button>
+          <button data-v="4" aria-pressed="true" data-tone="good">E · Learned</button>
+        </div>
+
+        <div class="field-wrap">
+          <canvas id="field" width="640" height="260" role="img" aria-label="Reliability map supplied to the affinity network"></canvas>
+          <div class="field-off" id="fieldOff">No gate map</div>
+        </div>
+        <div class="scale"><span>Doubted</span><i></i><span>Trusted</span></div>
+
+        <div class="readout">
+          <div class="ro-row">
+            <span class="ro-label">RMSE</span>
+            <span class="ro-val" id="roRmse">0.240<small>m</small></span>
+            <span class="bar"><i id="roBar" class="good" style="width:12%"></i></span>
+          </div>
+          <div class="ro-row">
+            <span class="ro-label">REC</span><span class="num" id="roRec" style="font-size:15px">+0.380</span>
+            <span class="ro-label" style="width:auto;margin-left:16px">RBS</span><span class="num" id="roRbs" style="font-size:15px">22.8%</span>
+          </div>
+          <p class="gate-read" id="roText"><strong>The learned gate.</strong> Reliability is spatially organised — low near occlusion boundaries and textureless surfaces, high where the coarse estimate is already sound. Refinement is steered to where it is needed.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ ABSTRACT / CONTRIBUTIONS ══════════════ -->
+<section class="sec band" id="contrib">
+  <div class="wrap">
+    <div class="cols wide">
+      <div>
+        <div class="sec-head"><span class="mark">Abstract</span><h2>Three gaps, closed by four contributions.</h2></div>
+        <p class="lede" style="margin-top:16px">Depth completion densifies sparse range measurements into metric depth. Reliable deployment needs more than accuracy: it needs an indication of <em class="k">where</em> those predictions may be wrong. Existing methods optimise accuracy and rarely produce calibrated per-pixel reliability; where confidence does exist it is typically terminal — reported and then discarded — or applied once at a fixed fusion point.</p>
+        <p class="small maxc">R³DC integrates reliability directly into refinement, and RADI measures whether that reliability is ranked correctly, exploited, and numerically meaningful. A spatially shuffled control shows the improvement depends on the correct <em class="k">spatial allocation</em> of reliability, not on the presence of an extra input channel.</p>
+
+        <div class="contrib">
+          <div>
+            <h4>Reliability as a control signal</h4>
+            <p class="small" style="margin:0">R̂ feeds the affinity network of a reliability-gated CSPN++ refiner. Low-confidence pixels take in more neighbourhood context; high-confidence pixels resist modification; sparse measurements are enforced as hard Dirichlet boundary conditions. Learned with no reliability ground truth.</p>
+          </div>
+          <div>
+            <h4>A measurable framework</h4>
+            <p class="small" style="margin:0">RADI decomposes confidence quality into orthogonal, independently falsifiable quantities — REC, RBS, CAL, retaining AUSE — each reported globally and across edge, textureless and far-depth regions, with five baselines scored under one protocol.</p>
+          </div>
+          <div>
+            <h4>A negative result with consequences</h4>
+            <p class="small" style="margin:0">On synthesised ground truth REC inverts. We derive analytically that this is an artefact of the generator, not model overconfidence, which bounds the validity of any reliability evaluation on simulated depth — including our own aerial benchmarks.</p>
+          </div>
+          <div>
+            <h4>Generality at 1.95–11.22 M</h4>
+            <p class="small" style="margin:0">One recipe — identical losses, loss weights, optimizer and augmentation — across ground-level, aerial, UAV and indoor settings, with competitive KITTI accuracy at 6.5–67× fewer parameters and a 16,642-parameter head for the indoor case.</p>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="quote">Of two models with identical RMSE, one may signal exactly where it is unreliable and the other may be uniformly and silently overconfident. Benchmarks rank them equally.</div>
+        <h4 style="margin-top:30px">Scope of claims</h4>
+        <p class="small">We do not claim state-of-the-art raw depth accuracy on KITTI. BP-Net and GuideFormer reach lower RMSE. The claim concerns the accuracy–efficiency–reliability trade: competitive accuracy at substantially fewer parameters, plus an actionable per-pixel reliability signal that is explicitly evaluated and used to guide refinement.</p>
+        <h4 style="margin-top:24px">What is not new here</h4>
+        <p class="small">Per-pixel confidence in depth completion (NCNN, pNCNN, branch confidence), spatial propagation, cross-modal attention, and ECE as a calibration measure. What is new is confidence used as a control signal for an iterative refiner's affinity weights, learned through the downstream objective; a three-part evaluation that separates ranking, exploitation and calibration; a controlled head-to-head of five reliability estimators; and evidence that synthetic ground truth can reverse their ranking.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ METHOD ══════════════ -->
+<section class="sec" id="method">
+  <div class="wrap">
+    <div class="sec-head"><span class="mark">§3 · Method</span><h2>Reveal, then revise.</h2></div>
+    <p class="lede">A single decoder cannot resolve the tension the task contains. Inferring global structure where no measurement exists wants large, smooth receptive fields; respecting sharp boundaries near anchors wants the opposite. Separating the two stages lets each use the mechanism it needs — and the reliability map is the interface between them.</p>
+
+    <figure class="fig">
+      <div class="plot">
+        <svg viewBox="0 0 1120 540" xmlns="http://www.w3.org/2000/svg" class="chart" role="img" aria-label="R3DC architecture: dual-stream encoder, cross-modal attention, transformer bottleneck, FPN decoder, three heads, and a reliability-gated CSPN++ refiner">
+          <defs>
+            <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--ink-soft)"/></marker>
+            <marker id="arT" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--trust)"/></marker>
+            <marker id="arD" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--doubt)"/></marker>
+          </defs>
+          <g font-family="IBM Plex Mono, monospace" font-size="12">
+            <!-- stage bands -->
+            <rect x="180" y="34" width="332" height="228" fill="var(--paper-hi)" stroke="var(--rule-soft)" rx="3"/>
+            <text x="192" y="52" font-size="10" letter-spacing=".12em" fill="var(--ink-faint)">DUAL-STREAM ENCODER</text>
+            <rect x="528" y="34" width="316" height="228" fill="var(--paper-hi)" stroke="var(--rule-soft)" rx="3"/>
+            <text x="540" y="52" font-size="10" letter-spacing=".12em" fill="var(--ink-faint)">BOTTLENECK + FPN DECODER</text>
+
+            <!-- inputs -->
+            <rect x="20" y="76" width="140" height="52" fill="var(--paper)" stroke="var(--ink)" rx="2"/>
+            <text x="90" y="99" text-anchor="middle" fill="var(--ink)" font-size="12.5">RGB image I</text>
+            <text x="90" y="115" text-anchor="middle" fill="var(--ink-faint)" font-size="10">3 × H × W</text>
+            <rect x="20" y="180" width="140" height="52" fill="var(--paper)" stroke="var(--doubt)" rx="2"/>
+            <text x="90" y="203" text-anchor="middle" fill="var(--doubt)" font-size="12.5">sparse dₛ ⊕ Mₛ</text>
+            <text x="90" y="219" text-anchor="middle" fill="var(--ink-faint)" font-size="10">ρ ≈ 0.1–5 %</text>
+
+            <!-- encoders -->
+            <rect x="196" y="76" width="152" height="52" fill="var(--paper)" stroke="var(--rule)" rx="2"/>
+            <text x="272" y="99" text-anchor="middle" fill="var(--ink)" font-size="12">RGB encoder</text>
+            <text x="272" y="115" text-anchor="middle" fill="var(--ink-faint)" font-size="10">3 residual stages · DropPath</text>
+            <rect x="196" y="180" width="152" height="52" fill="var(--paper)" stroke="var(--rule)" rx="2"/>
+            <text x="272" y="203" text-anchor="middle" fill="var(--ink)" font-size="12">depth encoder</text>
+            <text x="272" y="219" text-anchor="middle" fill="var(--ink-faint)" font-size="10">DCN v2 · offsets to valid returns</text>
+
+            <!-- CMA -->
+            <rect x="384" y="128" width="112" height="52" fill="var(--paper)" stroke="var(--rule)" rx="2"/>
+            <text x="440" y="151" text-anchor="middle" fill="var(--ink)" font-size="12">CMA × 3</text>
+            <text x="440" y="167" text-anchor="middle" fill="var(--ink-faint)" font-size="10">N_max = 512</text>
+
+            <!-- bottleneck + decoder -->
+            <rect x="544" y="128" width="140" height="52" fill="var(--paper)" stroke="var(--rule)" rx="2"/>
+            <text x="614" y="151" text-anchor="middle" fill="var(--ink)" font-size="12">transformer</text>
+            <text x="614" y="167" text-anchor="middle" fill="var(--ink-faint)" font-size="10">8 heads · CBAM · 1/16</text>
+            <rect x="716" y="128" width="116" height="52" fill="var(--paper)" stroke="var(--rule)" rx="2"/>
+            <text x="774" y="151" text-anchor="middle" fill="var(--ink)" font-size="12">FPN decoder</text>
+            <text x="774" y="167" text-anchor="middle" fill="var(--ink-faint)" font-size="10">4 × EfficientUp</text>
+
+            <!-- heads -->
+            <rect x="880" y="60" width="216" height="44" fill="var(--paper)" stroke="var(--ink)" rx="2"/>
+            <text x="896" y="87" fill="var(--ink)" font-size="12.5">depth head → D₀</text>
+            <text x="1080" y="87" text-anchor="end" fill="var(--ink-faint)" font-size="10">sigmoid</text>
+            <rect x="880" y="116" width="216" height="44" fill="var(--trust-tint)" stroke="var(--trust)" stroke-width="2" rx="2"/>
+            <text x="896" y="143" fill="var(--trust)" font-size="12.5" font-weight="600">reliability head → R̂</text>
+            <text x="1080" y="143" text-anchor="end" fill="var(--trust)" font-size="10">sigmoid</text>
+            <rect x="880" y="172" width="216" height="44" fill="var(--paper)" stroke="var(--ink)" rx="2"/>
+            <text x="896" y="199" fill="var(--ink)" font-size="12.5">uncertainty head → σ̂</text>
+            <text x="1080" y="199" text-anchor="end" fill="var(--ink-faint)" font-size="10">softplus</text>
+            <text x="880" y="240" fill="var(--ink-faint)" font-size="10">+ auxiliary depth heads at 1/2 and 1/4 — training only</text>
+
+            <!-- refiner row -->
+            <rect x="544" y="340" width="248" height="72" fill="var(--paper)" stroke="var(--trust)" stroke-width="2" rx="2"/>
+            <text x="668" y="368" text-anchor="middle" fill="var(--trust)" font-size="12.5" font-weight="600">affinity network · gated</text>
+            <text x="668" y="386" text-anchor="middle" fill="var(--ink-soft)" font-size="11">w = 0.8 · softmax(AffNet([u₁ ; R̂]))</text>
+            <text x="668" y="402" text-anchor="middle" fill="var(--ink-faint)" font-size="10">8 neighbour weights · centre fixed at 0.2</text>
+
+            <rect x="836" y="340" width="248" height="72" fill="var(--paper)" stroke="var(--ink)" rx="2"/>
+            <text x="960" y="368" text-anchor="middle" fill="var(--ink)" font-size="12.5">CSPN++ propagation</text>
+            <text x="960" y="386" text-anchor="middle" fill="var(--ink-soft)" font-size="11">T = 6 iterations</text>
+            <text x="960" y="402" text-anchor="middle" fill="var(--ink-faint)" font-size="10">anchors re-clamped every step</text>
+
+            <rect x="836" y="452" width="248" height="52" fill="var(--trust)" rx="2"/>
+            <text x="960" y="476" text-anchor="middle" fill="#fff" font-size="13.5" font-weight="600">refined depth D₁</text>
+            <text x="960" y="492" text-anchor="middle" fill="#CFE6E3" font-size="10">+ R̂ and σ̂, one forward pass</text>
+
+            <!-- arrows -->
+            <g stroke="var(--ink-soft)" stroke-width="1.4" fill="none" marker-end="url(#ar)">
+              <path d="M 160 102 L 190 102"/>
+              <path d="M 160 206 L 190 206"/>
+              <path d="M 348 102 L 366 102 L 366 146 L 378 146"/>
+              <path d="M 348 206 L 366 206 L 366 162 L 378 162"/>
+              <path d="M 496 154 L 538 154"/>
+              <path d="M 684 154 L 710 154"/>
+              <path d="M 832 154 L 856 154 L 856 82 L 874 82"/>
+              <path d="M 832 154 L 874 154"/>
+              <path d="M 856 154 L 856 194 L 874 194"/>
+              <path d="M 774 180 L 774 300 L 620 300 L 620 334" stroke-dasharray="4 3"/>
+              <path d="M 988 104 L 1104 104 L 1104 300 L 960 300 L 960 334"/>
+            </g>
+            <text x="700" y="292" text-anchor="middle" fill="var(--ink-faint)" font-size="10">decoder features u₁</text>
+            <text x="1040" y="292" text-anchor="middle" fill="var(--ink-faint)" font-size="10">coarse D₀</text>
+
+            <!-- the gate path, highlighted -->
+            <path d="M 880 138 L 852 138 L 852 250 L 500 250 L 500 376 L 538 376"
+                  stroke="var(--trust)" stroke-width="2.4" fill="none" marker-end="url(#arT)"/>
+            <rect x="516" y="228" width="196" height="24" fill="var(--paper)" rx="2"/>
+            <text x="524" y="245" fill="var(--trust)" font-size="11" font-weight="600">R̂ re-enters the prediction path</text>
+
+            <!-- Dirichlet anchors -->
+            <path d="M 90 232 L 90 478 L 830 478" stroke="var(--doubt)" stroke-width="1.6" fill="none"
+                  stroke-dasharray="5 4" marker-end="url(#arD)"/>
+            <text x="104" y="470" fill="var(--doubt)" font-size="11">sparse anchors as hard Dirichlet boundary conditions</text>
+
+            <path d="M 792 376 L 830 376" stroke="var(--trust)" stroke-width="2.4" fill="none" marker-end="url(#arT)"/>
+            <path d="M 960 412 L 960 446" stroke="var(--ink-soft)" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
+
+            <text x="20" y="520" fill="var(--ink-faint)" font-size="10">EMA inference · θ_EMA ← 0.9999 θ_EMA + 0.0001 θ · no extra inference cost</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption><b>Figure 1 — Architecture</b>
+        RGB and sparse depth are encoded separately, with deformable convolutions in the depth stream adapting receptive fields to valid returns. Cross-modal attention fuses the modalities at three scales; a transformer block with CBAM supplies global context at 1/16 resolution. Three heads read full-resolution decoder features. The teal path is the contribution: the predicted reliability map is supplied to the affinity network, where it modulates propagation rather than serving as a terminal output.
+      </figcaption>
+    </figure>
+
+    <div class="cols" style="margin-top:44px">
+      <div>
+        <h3>How reliability is supervised without labels</h3>
+        <p class="small">R̂ receives no direct supervision. Its learning signal arrives along two indirect paths. <em class="k">The gating gradient:</em> because R̂ enters Eq. 12, the loss on the refined prediction D₁ propagates through the affinity network and into the reliability head — assigning high reliability to an erroneous region permits inappropriate propagation and raises the SILog and Focal-BerHu terms. <em class="k">Shared-feature coupling:</em> the Laplace NLL trains σ̂ from the same decoder features u₁ that the reliability head reads, giving a shared basis for estimating residual uncertainty and reliability.</p>
+        <p class="small">This predicts where calibration should be strongest — near anchors and at boundaries, where propagation can change the output — and weakest in anchor-poor interiors. The region breakdown bears that out: far-depth, the region with the fewest returns, has the lowest REC.</p>
+
+        <h3 style="margin-top:26px">Log-space normalisation</h3>
+        <div class="eq">d̃ = [ ln(d + ε) − ln(d<sub>min</sub> + ε) ] / [ ln(d<sub>max</sub> + ε) − ln(d<sub>min</sub> + ε) ]&nbsp; ∈ [0,1]<br>
+        <span class="c">ε = 10⁻³ · compresses an 8× range difference between the 80 m outdoor and 10 m indoor settings</span></div>
+        <p class="note maxc">This, together with the sparse-anchor term and SILog, is why one set of loss weights covers all four domains unchanged.</p>
+      </div>
+
+      <div>
+        <h3>The composite objective</h3>
+        <p class="small">Five constraints — photometric accuracy, geometric consistency, structural fidelity, metric anchoring and uncertainty calibration — produce conflicting gradients when merged into a single term. Weights were fixed by grid search on a held-out KITTI split, then frozen across every dataset.</p>
+        <div class="scroller" style="margin-top:14px">
+          <table style="min-width:520px">
+            <thead><tr><th>Term</th><th>λ</th><th>Role</th><th>Δ if removed</th></tr></thead>
+            <tbody>
+              <tr><td>SILog</td><td>1.00</td><td>scale-invariant log error</td><td>+0.071</td></tr>
+              <tr><td>Focal-BerHu</td><td>0.60</td><td>continuous hard-pixel weighting</td><td>+0.010 <span style="color:var(--ink-faint)">vs BerHu</span></td></tr>
+              <tr><td>SSIM</td><td>0.20</td><td>structural fidelity, window 7</td><td>+0.009</td></tr>
+              <tr><td>Sparse anchor</td><td>0.15</td><td>pins metric scale to measurements</td><td>+0.020</td></tr>
+              <tr><td>Virtual normal</td><td>0.10</td><td>global geometry, no intrinsics</td><td>+0.021</td></tr>
+              <tr><td>Depth–normal cons.</td><td>0.05</td><td>Sobel normal alignment</td><td class="na">—</td></tr>
+              <tr><td>Gradient</td><td>0.05</td><td>discontinuity sharpness</td><td>+0.007</td></tr>
+              <tr><td>Laplace NLL</td><td>0.05</td><td>trains σ̂; punishes confident error</td><td>+0.012</td></tr>
+              <tr><td>Auxiliary</td><td>0.10</td><td>deep supervision at 1/2, 1/4</td><td>+0.020</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="tfoot">Δ in metres of validation RMSE, KITTI-uni at epoch 8, against the full objective at 0.240 m. Removing the Laplace NLL costs 0.012 m even though it supervises only σ̂ — calibration pressure improves the representation the depth head reads from. Sensitivity to the SILog weight is mild: λ = 2.0 costs 0.003 m.</p>
+      </div>
+    </div>
+
+    <ul class="list">
+      <li><b>Reveal</b><span>Dual-stream encoder, widths {B/2, B, 2B, 4B} at scales {1, ½, ¼, ⅛}. The depth stream's stride-2 layers use DCN v2 with zero-initialised offset convolutions, so each block is the identity at step 0 and learns to gather from valid measurements rather than averaging a mostly-empty grid.</span></li>
+      <li><b>Fuse</b><span>Depth features query RGB keys and values at three scales, with group normalisation on the query branch and logits clamped to [−8, 8] for FP16 stability. Attention is bounded to O(N²ₘₐₓ) by pooling to 512 tokens — a 384×640 input would otherwise produce 61,440 tokens at half resolution.</span></li>
+      <li><b>Revise</b><span>Reliability-gated CSPN++ for six iterations. Neighbour weights sum to 0.8 so the centre retains a fixed 0.2; pixels never reached by propagation fall back to the coarse estimate. Learned anisotropic diffusion, in which predicted reliability sets the effective diffusivity.</span></li>
+      <li><b>Indoor</b><span>For NYU the encoder is replaced by a frozen Depth-Anything-V2 ViT-S and only the Indoor Calibration Head trains: a three-layer perceptron on pooled bottleneck features predicting a scale–shift pair, plus the output heads and affinity network. The gap between a linear and a non-linear head is the informative part — relative-to-metric depth is not a global affine transform, which is the assumption most scale-recovery pipelines make.</span></li>
+      <li><b>Cost</b><span>The reliability and uncertainty heads read features the depth decoder has already computed; the affinity network gains one input channel. Together under 2% of the parameter budget, with no measurable change to the 50.4 ms single-pass latency.</span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ══════════════ RADI ══════════════ -->
+<section class="sec band" id="radi">
+  <div class="wrap">
+    <div class="sec-head"><span class="mark">§4 · RADI</span><h2>Three questions a deployment engineer asks that RMSE cannot answer.</h2></div>
+    <p class="lede">Consider a vehicle approaching a textureless wall. The model predicts 15 m; if it also reports low reliability, the planner can defer to radar or slow until parallax resolves the ambiguity, and the cost is a mild loss of efficiency. Now consider a specular puddle predicted at 10 m with reliability 0.85. The depth error may be identical. RMSE scores them identically. The second is the one that causes an accident.</p>
+
+    <div class="cards">
+      <div class="card"><div class="k">REC</div><p class="q">Does the model know where it is wrong?</p><div class="v">+0.371 · p &lt; 0.001</div><div class="f">Spearman(R̂, −|d̂ − d<sub>gt</sub>|) — rank, not linear, so it is invariant to the sigmoid parameterisation</div></div>
+      <div class="card"><div class="k">RBS</div><p class="q">Does it act on that knowledge?</p><div class="v">41.3%</div><div class="f">[RMSE(D₀) − RMSE(D₁)] / RMSE(D₀) — zero by construction for any method without a revision stage</div></div>
+      <div class="card"><div class="k">CAL</div><p class="q">Are the values numerically meaningful?</p><div class="v">0.041</div><div class="f">ECE over 15 equal-width bins at τ = 0.10 — a random predictor scores ≈ 0.25</div></div>
+      <div class="card"><div class="k">AUSE</div><p class="q">Does the ordering approach the oracle?</p><div class="v">0.061</div><div class="f">Retained as the established sparsification criterion, not replaced</div></div>
+    </div>
+
+    <div class="cols" style="margin-top:44px">
+      <div>
+        <h3>Why three numbers rather than one</h3>
+        <p class="small">A model can rank its errors correctly and never act on the ranking — high REC, zero RBS. It can act on a ranking whose absolute values are meaningless — high RBS, poor CAL. It can be numerically calibrated on average while ranking nothing correctly inside a region — good CAL, near-zero REC. Collapsing them into a scalar hides exactly the failure modes that matter at deployment.</p>
+        <p class="small">Sparsification is computed entirely on the output map, so AUSE is blind to whether the architecture consumed the ordering; and being invariant to rescaling, it is blind to whether a stated confidence of 0.8 means 80% of pixels are correct. A method can have excellent AUSE and still be useless on both counts. REC is preferred over the curve for three practical reasons: one number per region, a standard significance test, and a sign — so the inverted-confidence failure mode is visible rather than folded into an area.</p>
+        <p class="small"><em class="k">Negative RBS is a real failure mode.</em> It means the revise stage made the flagged pixels worse — a miscalibrated gate. RADI surfaces it; RMSE does not.</p>
+
+        <h3 style="margin-top:26px">Region masks</h3>
+        <p class="small">All components are reported over four regions, computed on the ground truth and applied identically to every method: <em class="k">all</em> (global baseline); <em class="k">edge</em>, Sobel magnitude &gt; 0.05, the discontinuities that dominate downstream failure; <em class="k">textureless</em>, local luminance standard deviation &lt; 8, where RGB guidance is weakest; and <em class="k">far-depth</em>, d &gt; 0.75 d<sub>max</sub>, where sensor noise dominates.</p>
+      </div>
+
+      <div>
+        <div class="algo">
+          <div style="font-family:var(--display);font-weight:700;font-size:14px;letter-spacing:.02em;margin-bottom:10px">Algorithm 1 · RADI</div>
+          <span class="ln">in</span><span class="kw">require</span> R̂, E = |d̂ − d<sub>gt</sub>|, masks {M<sub>r</sub>}, D₀, D₁, D, V,<br>
+          <span class="ln"></span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;B<sub>cal</sub> = 15, τ = 0.10<br><br>
+          <span class="ln">1</span><span class="kw">for</span> r ∈ {all, edge, textureless, far-depth}<br>
+          <span class="ln">2</span>&nbsp;&nbsp;m<sub>r</sub> ← V ∧ M<sub>r</sub><br>
+          <span class="ln">3</span>&nbsp;&nbsp;ρ<sup>REC</sup><sub>r</sub> ← Spearman( R̂[m<sub>r</sub>], −E[m<sub>r</sub>] )<br>
+          <span class="ln">4</span>&nbsp;&nbsp;R₀ ← √mean( (D₀[m<sub>r</sub>] − D[m<sub>r</sub>])² )<br>
+          <span class="ln">5</span>&nbsp;&nbsp;R₁ ← √mean( (D₁[m<sub>r</sub>] − D[m<sub>r</sub>])² )<br>
+          <span class="ln">6</span>&nbsp;&nbsp;RBS<sub>r</sub> ← (R₀ − R₁) / R₀ × 100%<br>
+          <span class="ln">7</span><span class="kw">end</span><br><br>
+          <span class="ln">8</span>bin R̂[V] into B<sub>cal</sub> equal-width bins<br>
+          <span class="ln">9</span><span class="kw">for</span> b = 1 … B<sub>cal</sub><br>
+          <span class="ln">10</span>&nbsp;&nbsp;r̄<sub>b</sub> ← mean( R̂ in bin b )<br>
+          <span class="ln">11</span>&nbsp;&nbsp;ā<sub>b</sub> ← mean( 𝟙[ E/D &lt; τ ] in bin b )<br>
+          <span class="ln">12</span><span class="kw">end</span><br>
+          <span class="ln">13</span>CAL ← Σ<sub>b</sub> (n<sub>b</sub>/N) · | r̄<sub>b</sub> − ā<sub>b</sub> |
+        </div>
+        <p class="tfoot">RADI is model-agnostic. Any method producing a confidence map can be scored; for single-stage methods pass D₀ ≡ D₁ and report RBS as not applicable rather than as a zero score. If you use it, please state the configuration — B<sub>cal</sub> = 15, τ = 0.10 — and the depth space in which RBS was computed, since log-space and metric-space values are not comparable.</p>
+      </div>
+    </div>
+
+    <figure class="fig reveal">
+      <div class="plot"><svg viewBox="0 0 780 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Coarse to refined RMSE by region" class="chart"><text x="130.0" y="22.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10" fill="var(--doubt)" text-anchor="start" font-weight="600" letter-spacing=".04em">coarse D₀</text><text x="630.0" y="22.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10" fill="var(--trust)" text-anchor="end" font-weight="600" letter-spacing=".04em">refined D₁ · RBS · REC</text><line x1="150.8" y1="34.0" x2="150.8" y2="308.0" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="150.8" y="328.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">0.3</text><line x1="255.0" y1="34.0" x2="255.0" y2="308.0" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="255.0" y="328.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">0.4</text><line x1="359.2" y1="34.0" x2="359.2" y2="308.0" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="359.2" y="328.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">0.5</text><line x1="463.3" y1="34.0" x2="463.3" y2="308.0" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="463.3" y="328.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">0.6</text><line x1="567.5" y1="34.0" x2="567.5" y2="308.0" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="567.5" y="328.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">0.7</text><text x="630.0" y="346.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">RMSE (m) · NYU Depth V2, metric space</text><text x="116.0" y="77.5" font-family="Source Serif 4, serif" font-size="12.5" fill="var(--ink)" text-anchor="end" font-weight="600" letter-spacing="0">all</text><line x1="206.0" y1="73.5" x2="464.4" y2="73.5" stroke="var(--ink-soft)" stroke-width="2.5"/><circle cx="464.4" cy="73.5" r="6" fill="var(--paper)" stroke="var(--doubt)" stroke-width="2"/><text x="476.4" y="77.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--doubt)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.601</text><circle cx="206.0" cy="73.5" r="6.5" fill="var(--trust)" stroke="none" stroke-width="0"/><text x="194.0" y="77.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--trust)" text-anchor="end" font-weight="600" letter-spacing=".04em">0.353</text><text x="692.0" y="77.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="12" fill="var(--trust)" text-anchor="start" font-weight="600" letter-spacing=".04em">−41.3%</text><text x="774.0" y="77.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">REC +0.371</text><text x="116.0" y="144.5" font-family="Source Serif 4, serif" font-size="12.5" fill="var(--ink)" text-anchor="end" font-weight="600" letter-spacing="0">edge</text><line x1="242.5" y1="140.5" x2="508.1" y2="140.5" stroke="var(--ink-soft)" stroke-width="2.5"/><circle cx="508.1" cy="140.5" r="6" fill="var(--paper)" stroke="var(--doubt)" stroke-width="2"/><text x="520.1" y="144.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--doubt)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.643</text><circle cx="242.5" cy="140.5" r="6.5" fill="var(--trust)" stroke="none" stroke-width="0"/><text x="230.5" y="144.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--trust)" text-anchor="end" font-weight="600" letter-spacing=".04em">0.388</text><text x="692.0" y="144.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="12" fill="var(--trust)" text-anchor="start" font-weight="600" letter-spacing=".04em">−39.7%</text><text x="774.0" y="144.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">REC +0.358</text><text x="116.0" y="211.5" font-family="Source Serif 4, serif" font-size="12.5" fill="var(--ink)" text-anchor="end" font-weight="600" letter-spacing="0">textureless</text><line x1="170.6" y1="207.5" x2="418.5" y2="207.5" stroke="var(--ink-soft)" stroke-width="2.5"/><circle cx="418.5" cy="207.5" r="6" fill="var(--paper)" stroke="var(--doubt)" stroke-width="2"/><text x="430.5" y="211.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--doubt)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.557</text><circle cx="170.6" cy="207.5" r="6.5" fill="var(--trust)" stroke="none" stroke-width="0"/><text x="158.6" y="211.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--trust)" text-anchor="end" font-weight="600" letter-spacing=".04em">0.319</text><text x="692.0" y="211.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="12" fill="var(--trust)" text-anchor="start" font-weight="600" letter-spacing=".04em">−42.7%</text><text x="774.0" y="211.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">REC +0.389</text><text x="116.0" y="278.5" font-family="Source Serif 4, serif" font-size="12.5" fill="var(--ink)" text-anchor="end" font-weight="600" letter-spacing="0">far-depth</text><line x1="287.3" y1="274.5" x2="582.1" y2="274.5" stroke="var(--ink-soft)" stroke-width="2.5"/><circle cx="582.1" cy="274.5" r="6" fill="var(--paper)" stroke="var(--doubt)" stroke-width="2"/><text x="594.1" y="278.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--doubt)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.714</text><circle cx="287.3" cy="274.5" r="6.5" fill="var(--trust)" stroke="none" stroke-width="0"/><text x="275.3" y="278.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--trust)" text-anchor="end" font-weight="600" letter-spacing=".04em">0.431</text><text x="692.0" y="278.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="12" fill="var(--trust)" text-anchor="start" font-weight="600" letter-spacing=".04em">−39.6%</text><text x="774.0" y="278.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">REC +0.341</text></svg></div>
+      <figcaption><b>Figure 2 — Revision benefit by region</b>
+        Coarse D₀ to refined D₁ on the full NYU Depth V2 test set, metric space. RBS exceeds 39% in every region, and REC is significant at p &lt; 0.001 throughout. The correlation is strongest in textureless areas — precisely where RGB guidance is weakest and accuracy metrics are least diagnostic — and weakest at far depth, where sensor noise dominates the residual and the gating gradient is thinnest.
+      </figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ══════════════ RESULTS ══════════════ -->
+<section class="sec" id="results">
+  <div class="wrap">
+    <div class="sec-head"><span class="mark">§5 · Results</span><h2>An accuracy–efficiency–reliability trade, stated as one.</h2></div>
+    <p class="lede">Two KITTI protocols are kept separate and labelled everywhere. <em class="k">KITTI-official</em> is the benchmark split with structured Velodyne input, reported in millimetres, and is the only protocol used against prior work. <em class="k">KITTI-uni</em> is a diagnostic split with 5% uniformly subsampled anchors, reported in metres, cheap enough to run the full ablation grid — and never compared against published baselines.</p>
+
+    <figure class="fig reveal">
+      <div class="plot"><svg viewBox="0 0 780 450" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="KITTI RMSE against parameter count" class="chart"><line x1="66.0" y1="30.0" x2="756.0" y2="30.0" stroke="var(--rule)" stroke-width="1"/><text x="56.0" y="34.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">600</text><line x1="66.0" y1="117.1" x2="756.0" y2="117.1" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="56.0" y="121.1" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">650</text><line x1="66.0" y1="204.3" x2="756.0" y2="204.3" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="56.0" y="208.3" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">700</text><line x1="66.0" y1="291.4" x2="756.0" y2="291.4" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="56.0" y="295.4" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">750</text><line x1="66.0" y1="378.6" x2="756.0" y2="378.6" stroke="var(--rule)" stroke-width="1"/><text x="56.0" y="382.6" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">800</text><text x="114.7" y="416.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">2</text><text x="239.7" y="416.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">5</text><text x="334.3" y="416.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">10</text><text x="428.8" y="416.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">20</text><text x="553.8" y="416.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">50</text><text x="648.4" y="416.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">100</text><text x="743.0" y="416.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">200</text><line x1="66.0" y1="396.0" x2="756.0" y2="396.0" stroke="var(--ink)" stroke-width="1"/><text x="56.0" y="18.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">KITTI RMSE (mm)</text><text x="756.0" y="436.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">parameters (M, log scale)</text><rect x="66.0" y="30.0" width="287.3" height="366.0" fill="var(--trust)" opacity="0.06" rx="0"/><text x="81.4" y="48.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--trust)" text-anchor="start" font-weight="400" letter-spacing=".04em">no competing method</text><text x="81.4" y="61.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--trust)" text-anchor="start" font-weight="400" letter-spacing=".04em">operates below 12 M</text><circle cx="409.8" cy="280.4" r="5" fill="var(--paper)" stroke="var(--ink-soft)" stroke-width="1.6"/><text x="398.8" y="271.4" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" fill="var(--ink-soft)" text-anchor="end" font-weight="400" letter-spacing=".04em">CSPN++</text><circle cx="468.8" cy="277.0" r="5" fill="var(--paper)" stroke="var(--ink-soft)" stroke-width="1.6"/><text x="479.8" y="281.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" fill="var(--ink-soft)" text-anchor="start" font-weight="400" letter-spacing=".04em">NLSPN</text><circle cx="685.3" cy="256.7" r="5" fill="var(--paper)" stroke="var(--ink-soft)" stroke-width="1.6"/><text x="674.3" y="247.7" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" fill="var(--ink-soft)" text-anchor="end" font-weight="400" letter-spacing=".04em">PENet</text><circle cx="489.1" cy="102.3" r="5" fill="var(--paper)" stroke="var(--ink-soft)" stroke-width="1.6"/><text x="500.1" y="106.3" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" fill="var(--ink-soft)" text-anchor="start" font-weight="400" letter-spacing=".04em">DynFusion</text><circle cx="471.3" cy="74.3" r="5" fill="var(--paper)" stroke="var(--ink-soft)" stroke-width="1.6"/><text x="482.3" y="78.3" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" fill="var(--ink-soft)" text-anchor="start" font-weight="400" letter-spacing=".04em">GuideFormer</text><circle cx="366.9" cy="218.6" r="5" fill="var(--paper)" stroke="var(--ink-soft)" stroke-width="1.6"/><text x="355.9" y="220.6" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" fill="var(--ink-soft)" text-anchor="end" font-weight="400" letter-spacing=".04em">CompletionFormer</text><circle cx="486.0" cy="154.3" r="5" fill="var(--paper)" stroke="var(--ink-soft)" stroke-width="1.6"/><text x="497.0" y="158.3" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" fill="var(--ink-soft)" text-anchor="start" font-weight="400" letter-spacing=".04em">BP-Net</text><path d="M 111.2 347.9 L 118.2 354.9 L 111.2 361.9 L 104.2 354.9 Z" fill="var(--trust)" stroke="none" stroke-width="0"/><text x="123.2" y="359.9" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="12" fill="var(--trust)" text-anchor="start" font-weight="600" letter-spacing=".04em">R³DC</text><path d="M 350.0 248.0 L 357.0 255.0 L 350.0 262.0 L 343.0 255.0 Z" fill="var(--trust)" stroke="none" stroke-width="0"/><text x="338.0" y="274.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="12" fill="var(--trust)" text-anchor="end" font-weight="600" letter-spacing=".04em">R³DC+</text></svg></div>
+      <figcaption><b>Figure 3 — Accuracy against model size, KITTI-official</b>
+        R³DC sits between CSPN++ and PENet at 8.9× and 67× fewer parameters; R³DC+ lands within 1 mm of PENet with 11.7× fewer, and within 21 mm of CompletionFormer. GuideFormer and BP-Net reach lower RMSE and remain stronger on raw accuracy — we do not claim otherwise. The shaded band marks the parameter region no competing method occupies.
+      </figcaption>
+    </figure>
+
+    <div class="tbl">
+      <div class="tbl-cap"><h3>KITTI Depth Completion · official benchmark</h3><span class="src">Table 6 · millimetres · iRMSE and iMAE in 1/km</span></div>
+      <div class="scroller">
+        <table>
+          <thead><tr><th>Method</th><th>Venue</th><th>Params</th><th>Ratio</th><th>RMSE ↓</th><th>MAE ↓</th><th>iRMSE ↓</th><th>iMAE ↓</th><th>Reliability</th></tr></thead>
+          <tbody>
+            <tr><td>CSPN++</td><td>AAAI ’20</td><td>17.4 M</td><td>8.9×</td><td>743.7</td><td>209.3</td><td>2.07</td><td>0.90</td><td class="na">no</td></tr>
+            <tr><td>NLSPN</td><td>ECCV ’20</td><td>26.8 M</td><td>13.7×</td><td>741.7</td><td>199.6</td><td>1.99</td><td>0.84</td><td class="na">no</td></tr>
+            <tr><td>PENet</td><td>ICRA ’21</td><td>131.0 M</td><td>67.2×</td><td>730.1</td><td>210.4</td><td>2.17</td><td>0.94</td><td class="na">no</td></tr>
+            <tr><td>DynFusion</td><td>CVPR ’22</td><td>31.1 M</td><td>15.9×</td><td>641.5</td><td>190.1</td><td>1.93</td><td>0.82</td><td class="na">no</td></tr>
+            <tr><td>GuideFormer</td><td>CVPR ’22</td><td>27.3 M</td><td>14.0×</td><td class="best">625.4</td><td class="best">188.2</td><td class="best">1.84</td><td class="best">0.79</td><td class="na">no</td></tr>
+            <tr><td>CompletionFormer</td><td>CVPR ’23</td><td>12.7 M</td><td>6.5×</td><td>708.2</td><td>203.1</td><td>2.01</td><td>0.86</td><td class="na">no</td></tr>
+            <tr><td>BP-Net</td><td>CVPR ’24</td><td>30.4 M</td><td>15.6×</td><td>671.3</td><td>187.9</td><td>1.91</td><td>0.82</td><td class="na">no</td></tr>
+            <tr class="ours"><td>R³DC</td><td>ours</td><td>1.95 M</td><td>1.0×</td><td>786.4</td><td>221.7</td><td>2.18</td><td>0.95</td><td>per-pixel</td></tr>
+            <tr class="ours"><td>R³DC+</td><td>ours</td><td>11.22 M</td><td>5.8×</td><td>729.1</td><td>204.8</td><td>2.06</td><td>0.88</td><td>per-pixel</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="tfoot">Baseline figures are from the official leaderboard or the original papers. Ratio is parameters relative to R³DC.</p>
+    </div>
+
+    <div class="tbl">
+      <div class="tbl-cap"><h3>NYU Depth V2 · a 16,642-parameter head on a frozen backbone</h3><span class="src">Table 7 · completion protocol, 0.1% anchors, 518×518</span></div>
+      <div class="scroller">
+        <table>
+          <thead><tr><th>Method</th><th>Params</th><th>δ₁ ↑</th><th>AbsRel ↓</th><th>RMSE ↓</th><th>MAE ↓</th></tr></thead>
+          <tbody>
+            <tr class="grp"><td colspan="6">Depth completion — sparse anchors used</td></tr>
+            <tr><td>CSPN++ ⋆</td><td>17.4 M</td><td>0.883</td><td>0.118</td><td>0.468 m</td><td>0.341 m</td></tr>
+            <tr><td>NLSPN ⋆</td><td>26.8 M</td><td>0.891</td><td>0.112</td><td>0.441 m</td><td>0.318 m</td></tr>
+            <tr><td>CompletionFormer ⋆</td><td>12.7 M</td><td>0.908</td><td>0.101</td><td>0.394 m</td><td>0.278 m</td></tr>
+            <tr><td>DA-V2 ViT-S — backbone only</td><td>94.6 M</td><td>0.919</td><td>0.098</td><td>0.365 m</td><td>0.241 m</td></tr>
+            <tr class="ours"><td>R³DC + ICH</td><td>94.6 M · 16,642 trainable</td><td>0.927</td><td>0.090</td><td>0.353 m</td><td>0.241 m</td></tr>
+            <tr class="grp"><td colspan="6">Monocular metric depth — no sparse input, context only</td></tr>
+            <tr class="zero"><td>AdaBins</td><td>78.2 M</td><td>0.902</td><td>0.103</td><td>0.288 m</td><td>0.219 m</td></tr>
+            <tr class="zero"><td>DepthFormer</td><td>34.3 M</td><td>0.921</td><td>0.096</td><td>0.270 m</td><td>0.195 m</td></tr>
+            <tr class="zero"><td>NeWCRFs</td><td>270.0 M</td><td>0.922</td><td>0.095</td><td>0.264 m</td><td>0.190 m</td></tr>
+            <tr class="zero"><td>ZoeDepth</td><td>345.0 M</td><td>0.951</td><td>0.075</td><td>0.270 m</td><td>0.171 m</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="tfoot">⋆ retrained by us under the completion protocol. Stated plainly: on RMSE and MAE, dedicated monocular metric models remain better than our indoor variant despite our access to sparse anchors, because their decoders are far heavier than a three-layer adapter. The claim Table 7 supports is that a 16 k-parameter head converts a relative-depth foundation model into a competitive metric completion model — not that it beats purpose-built monocular architectures on every metric.</p>
+    </div>
+
+    <div class="tbl">
+      <div class="tbl-cap"><h3>Indoor Calibration Head · decomposed</h3><span class="src">Table 15 · all rows share the DA-V2 ViT-S backbone</span></div>
+      <div class="scroller">
+        <table style="min-width:520px">
+          <thead><tr><th>Model</th><th>δ₁ ↑</th><th>AbsRel ↓</th><th>RMSE ↓</th><th>Extra params</th></tr></thead>
+          <tbody>
+            <tr><td>Backbone, frozen</td><td>0.915</td><td>0.102</td><td>0.379 m</td><td>0</td></tr>
+            <tr><td>Backbone, fine-tuned</td><td>0.919</td><td>0.098</td><td>0.365 m</td><td>0</td></tr>
+            <tr><td>+ ICH, linear</td><td>0.921</td><td>0.095</td><td>0.361 m</td><td>8,321</td></tr>
+            <tr class="ours"><td>+ ICH, MLP (ours)</td><td>0.927</td><td>0.090</td><td>0.353 m</td><td>16,642</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="tfoot">The informative gap is linear against non-linear: +0.006 δ₁ and −0.008 m RMSE. Relative-to-metric depth is not a global affine transform. The full head costs under 0.018% of the backbone.</p>
+    </div>
+
+    <h3 style="margin-top:56px">The reliability comparison</h3>
+    <p class="lede" style="margin-top:10px">A RADI score is only interpretable against alternatives, and confidence-aware depth work has generally reported calibration numbers with no comparison point. Five reliability sources are therefore evaluated under one identical protocol.</p>
+
+    <div class="fig-pair" style="margin-top:26px">
+      <figure class="fig reveal" style="margin-top:0">
+        <div class="plot"><svg viewBox="0 0 780 430" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="REC by region for six reliability sources" class="chart"><line x1="66.0" y1="334.0" x2="756.0" y2="334.0" stroke="var(--ink)" stroke-width="1"/><text x="56.0" y="338.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">0.0</text><line x1="66.0" y1="260.7" x2="756.0" y2="260.7" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="56.0" y="264.7" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">0.1</text><line x1="66.0" y1="187.3" x2="756.0" y2="187.3" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="56.0" y="191.3" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">0.2</text><line x1="66.0" y1="114.0" x2="756.0" y2="114.0" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="56.0" y="118.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">0.3</text><line x1="66.0" y1="40.7" x2="756.0" y2="40.7" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="56.0" y="44.7" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">0.4</text><text x="56.0" y="18.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">REC (Spearman ρ) by evaluation region</text><rect x="82.3" y="334.0" width="24.1" height="1.5" fill="var(--ink-soft)" opacity="0.62" rx="0"/><rect x="111.4" y="334.0" width="24.1" height="1.5" fill="var(--ink-soft)" opacity="0.44" rx="0"/><rect x="140.6" y="334.0" width="24.1" height="1.5" fill="var(--ink-soft)" opacity="0.28" rx="0"/><text x="123.5" y="354.0" font-family="Source Serif 4, serif" font-size="11" fill="var(--ink-soft)" text-anchor="middle" font-weight="400" letter-spacing="0">Uniform</text><rect x="197.3" y="226.2" width="24.1" height="107.8" fill="var(--ink-soft)" opacity="0.62" rx="0"/><rect x="226.4" y="237.9" width="24.1" height="96.1" fill="var(--ink-soft)" opacity="0.44" rx="0"/><rect x="255.6" y="210.1" width="24.1" height="123.9" fill="var(--ink-soft)" opacity="0.28" rx="0"/><text x="238.5" y="354.0" font-family="Source Serif 4, serif" font-size="11" fill="var(--ink-soft)" text-anchor="middle" font-weight="400" letter-spacing="0">Inverse-grad.</text><rect x="312.3" y="177.1" width="24.1" height="156.9" fill="var(--ink-soft)" opacity="0.62" rx="0"/><rect x="341.4" y="188.8" width="24.1" height="145.2" fill="var(--ink-soft)" opacity="0.44" rx="0"/><rect x="370.6" y="164.6" width="24.1" height="169.4" fill="var(--ink-soft)" opacity="0.28" rx="0"/><text x="353.5" y="354.0" font-family="Source Serif 4, serif" font-size="11" fill="var(--ink-soft)" text-anchor="middle" font-weight="400" letter-spacing="0">Error proxy</text><rect x="427.3" y="135.3" width="24.1" height="198.7" fill="var(--ink-soft)" opacity="0.62" rx="0"/><rect x="456.4" y="151.4" width="24.1" height="182.6" fill="var(--ink-soft)" opacity="0.44" rx="0"/><rect x="485.6" y="119.9" width="24.1" height="214.1" fill="var(--ink-soft)" opacity="0.28" rx="0"/><text x="468.5" y="354.0" font-family="Source Serif 4, serif" font-size="11" fill="var(--ink-soft)" text-anchor="middle" font-weight="400" letter-spacing="0">MC dropout</text><rect x="542.3" y="111.8" width="24.1" height="222.2" fill="var(--ink-soft)" opacity="0.62" rx="0"/><rect x="571.4" y="127.9" width="24.1" height="206.1" fill="var(--ink-soft)" opacity="0.44" rx="0"/><rect x="600.6" y="100.1" width="24.1" height="233.9" fill="var(--ink-soft)" opacity="0.28" rx="0"/><text x="583.5" y="354.0" font-family="Source Serif 4, serif" font-size="11" fill="var(--ink-soft)" text-anchor="middle" font-weight="400" letter-spacing="0">Deep ensemble</text><rect x="657.3" y="61.9" width="24.1" height="272.1" fill="var(--trust)" opacity="1" rx="0"/><text x="669.4" y="54.9" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--trust)" text-anchor="middle" font-weight="600" letter-spacing=".04em">0.371</text><rect x="686.4" y="71.5" width="24.1" height="262.5" fill="var(--trust)" opacity="0.72" rx="0"/><text x="698.5" y="64.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--trust)" text-anchor="middle" font-weight="600" letter-spacing=".04em">0.358</text><rect x="715.6" y="48.7" width="24.1" height="285.3" fill="var(--trust)" opacity="0.48" rx="0"/><text x="727.6" y="41.7" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--trust)" text-anchor="middle" font-weight="600" letter-spacing=".04em">0.389</text><text x="698.5" y="354.0" font-family="Source Serif 4, serif" font-size="11" fill="var(--trust)" text-anchor="middle" font-weight="600" letter-spacing="0">Learned R̂</text><rect x="66.0" y="386.0" width="13.0" height="10.0" fill="var(--trust)" opacity="1" rx="0"/><text x="85.0" y="395.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">all</text><rect x="113.0" y="386.0" width="13.0" height="10.0" fill="var(--trust)" opacity="0.72" rx="0"/><text x="132.0" y="395.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">edge</text><rect x="167.0" y="386.0" width="13.0" height="10.0" fill="var(--trust)" opacity="0.48" rx="0"/><text x="186.0" y="395.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">textureless</text></svg></div>
+        <figcaption><b>Figure 4 — REC by region</b>
+          The ordering is preserved in every region, and the margin over the strongest baseline is widest where RGB guidance is weakest.
+        </figcaption>
+      </figure>
+      <figure class="fig reveal" style="margin-top:0">
+        <div class="plot"><svg viewBox="0 0 780 380" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Calibration error across reliability sources" class="chart"><line x1="659.1" y1="26.0" x2="659.1" y2="330.0" stroke="var(--doubt)" stroke-width="1" stroke-dasharray="3 3"/><text x="659.1" y="20.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--doubt)" text-anchor="middle" font-weight="400" letter-spacing=".04em">random predictor</text><rect x="176.0" y="44.7" width="483.1" height="24.3" fill="var(--ink-soft)" opacity="0.42" rx="1"/><text x="164.0" y="60.9" font-family="Source Serif 4, serif" font-size="11.5" fill="var(--ink-soft)" text-anchor="end" font-weight="400" letter-spacing="0">Uniform (≡0.5)</text><text x="667.1" y="60.9" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.248</text><text x="774.0" y="60.9" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">RBS 0%</text><rect x="176.0" y="93.4" width="356.5" height="24.3" fill="var(--ink-soft)" opacity="0.42" rx="1"/><text x="164.0" y="109.5" font-family="Source Serif 4, serif" font-size="11.5" fill="var(--ink-soft)" text-anchor="end" font-weight="400" letter-spacing="0">Inverse-gradient</text><text x="540.5" y="109.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.183</text><text x="774.0" y="109.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">RBS 0%</text><rect x="176.0" y="142.0" width="276.6" height="24.3" fill="var(--ink-soft)" opacity="0.42" rx="1"/><text x="164.0" y="158.2" font-family="Source Serif 4, serif" font-size="11.5" fill="var(--ink-soft)" text-anchor="end" font-weight="400" letter-spacing="0">Depth-error proxy</text><text x="460.6" y="158.2" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.142</text><text x="774.0" y="158.2" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">RBS 0%</text><rect x="176.0" y="190.7" width="229.9" height="24.3" fill="var(--ink-soft)" opacity="0.42" rx="1"/><text x="164.0" y="206.9" font-family="Source Serif 4, serif" font-size="11.5" fill="var(--ink-soft)" text-anchor="end" font-weight="400" letter-spacing="0">MC dropout, 20×</text><text x="413.9" y="206.9" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.118</text><text x="774.0" y="206.9" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">RBS 0%</text><rect x="176.0" y="239.4" width="189.0" height="24.3" fill="var(--ink-soft)" opacity="0.42" rx="1"/><text x="164.0" y="255.5" font-family="Source Serif 4, serif" font-size="11.5" fill="var(--ink-soft)" text-anchor="end" font-weight="400" letter-spacing="0">Deep ensemble, 3×</text><text x="373.0" y="255.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.097</text><text x="774.0" y="255.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">RBS 0%</text><rect x="176.0" y="288.0" width="79.9" height="24.3" fill="var(--trust)" opacity="1" rx="1"/><text x="164.0" y="304.2" font-family="Source Serif 4, serif" font-size="11.5" fill="var(--trust)" text-anchor="end" font-weight="600" letter-spacing="0">Learned R̂, 1×</text><text x="263.9" y="304.2" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" fill="var(--trust)" text-anchor="start" font-weight="600" letter-spacing=".04em">0.041</text><text x="774.0" y="304.2" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10" fill="var(--trust)" text-anchor="end" font-weight="600" letter-spacing=".04em">RBS 41.3%</text><line x1="176.0" y1="330.0" x2="702.0" y2="330.0" stroke="var(--ink)" stroke-width="1"/><text x="176.0" y="348.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">0.00</text><text x="273.4" y="348.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">0.05</text><text x="370.8" y="348.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">0.10</text><text x="468.2" y="348.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">0.15</text><text x="565.6" y="348.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">0.20</text><text x="663.0" y="348.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">0.25</text><text x="176.0" y="368.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">CAL — expected calibration error, 15 bins, τ = 0.10. Lower is better.</text></svg></div>
+        <figcaption><b>Figure 5 — Calibration, with RBS annotated</b>
+          CAL falls monotonically as REC rises. RBS is non-zero for one source only, because it alone re-enters the prediction path.
+        </figcaption>
+      </figure>
+    </div>
+
+    <div class="tbl">
+      <div class="tbl-cap"><h3>NYU Depth V2 · learned reliability against five alternatives</h3><span class="src">Tables 10, 19, 20</span></div>
+      <div class="scroller">
+        <table>
+          <thead><tr><th>Reliability source</th><th>Depth model</th><th>Passes</th><th>REC ↑</th><th>95% CI</th><th>AUSE ↓</th><th>CAL ↓</th><th>RBS ↑</th></tr></thead>
+          <tbody>
+            <tr class="zero"><td>Uniform (≡ 0.5)</td><td>CompletionFormer</td><td>1</td><td>0.000</td><td>[−0.002, 0.002]</td><td>0.184</td><td>0.248</td><td>0.0%</td></tr>
+            <tr class="zero"><td>Inverse-gradient heuristic</td><td>CompletionFormer</td><td>1</td><td>0.147</td><td>[0.139, 0.155]</td><td>0.139</td><td>0.183</td><td>0.0%</td></tr>
+            <tr class="zero"><td>Depth-error proxy</td><td>R³DC+ICH</td><td>1</td><td>0.214</td><td>[0.205, 0.223]</td><td>0.117</td><td>0.151</td><td>0.0%</td></tr>
+            <tr class="zero"><td>MC dropout</td><td>CompletionFormer</td><td>20</td><td>0.271</td><td>[0.260, 0.282]</td><td>0.098</td><td>0.126</td><td>0.0%</td></tr>
+            <tr class="zero"><td>Deep ensemble</td><td>CompletionFormer</td><td>3</td><td>0.303</td><td>[0.292, 0.314]</td><td>0.087</td><td>0.097</td><td>0.0%</td></tr>
+            <tr class="ours"><td>Learned R̂ (ours)</td><td>R³DC+ICH</td><td>1</td><td>0.371</td><td>[0.359, 0.383]</td><td>0.061</td><td>0.041</td><td>41.3%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="tfoot">MC dropout and ensembling run on CompletionFormer, whose depth is less accurate than R³DC+ICH, so their REC values are lower bounds. The depth-error proxy therefore uses <em>our</em> depth with heuristic reliability, giving a like-for-like isolation of the learned head — and the increase from +0.214 to +0.371 is evidence that the learned signal carries information the fixed proxy cannot.</p>
+    </div>
+
+    <div class="cols narrow" style="margin-top:40px">
+      <div>
+        <h3>Statistical robustness</h3>
+        <p class="small">Confidence intervals come from non-parametric bootstrap resampling over the test set, B = 10,000 replicates, with pixels sampled with replacement. Significance uses a paired bootstrap in which identical pixels are sampled for competing estimators, with Holm correction for multiple comparisons.</p>
+        <p class="small">The interval for the learned head, [0.359, 0.383], has negligible overlap with the ensemble's [0.292, 0.314]. Against every alternative the advantage is significant at p &lt; 0.001.</p>
+      </div>
+      <div>
+        <div class="scroller">
+          <table style="min-width:560px">
+            <thead><tr><th>Comparison</th><th>ΔREC</th><th>95% CI</th><th>Adj. p</th></tr></thead>
+            <tbody>
+              <tr><td>Learned − Uniform</td><td>+0.371</td><td>[+0.355, +0.387]</td><td>&lt; 0.001</td></tr>
+              <tr><td>Learned − Inverse-gradient</td><td>+0.224</td><td>[+0.205, +0.243]</td><td>&lt; 0.001</td></tr>
+              <tr><td>Learned − Error proxy</td><td>+0.157</td><td>[+0.139, +0.175]</td><td>&lt; 0.001</td></tr>
+              <tr><td>Learned − MC dropout</td><td>+0.100</td><td>[+0.082, +0.118]</td><td>&lt; 0.001</td></tr>
+              <tr class="ours"><td>Learned − Deep ensemble</td><td>+0.068</td><td>[+0.050, +0.086]</td><td>&lt; 0.001</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="scroller" style="margin-top:18px">
+          <table style="min-width:620px">
+            <thead><tr><th>Five independent seeds</th><th>RMSE ↓</th><th>MAE ↓</th><th>REC ↑</th><th>AUSE ↓</th><th>CAL ↓</th><th>RBS ↑</th></tr></thead>
+            <tbody>
+              <tr><td>R³DC</td><td>0.371 ±.006</td><td>0.248 ±.004</td><td>0.362 ±.012</td><td>0.064 ±.004</td><td>0.047 ±.004</td><td>39.8 ±1.3%</td></tr>
+              <tr class="ours"><td>R³DC + ICH</td><td>0.353 ±.004</td><td>0.241 ±.003</td><td>0.371 ±.009</td><td>0.061 ±.003</td><td>0.041 ±.003</td><td>41.3 ±1.1%</td></tr>
+              <tr class="zero"><td>R³DC, shuffled R̂ — negative control</td><td>0.384 ±.005</td><td>0.259 ±.004</td><td>0.008 ±.006</td><td>0.173 ±.005</td><td>0.249 ±.005</td><td>0.7 ±0.9%</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="tfoot">The shuffled control preserves the computational structure of the gating mechanism while destroying spatial correspondence. Its collapse to near-zero REC and RBS across all five seeds establishes the negative control: the improvement does not come from the presence of a gating operation, but from alignment between the reliability signal and the error.</p>
+      </div>
+    </div>
+
+    <figure class="fig reveal">
+      <div class="plot"><svg viewBox="0 0 780 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="REC against inference latency" class="chart"><rect x="258.8" y="30.0" width="497.2" height="314.0" fill="var(--doubt)" opacity="0.05" rx="0"/><line x1="258.8" y1="30.0" x2="258.8" y2="344.0" stroke="var(--doubt)" stroke-width="1" stroke-dasharray="3 3"/><text x="267.7" y="46.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--doubt)" text-anchor="start" font-weight="400" letter-spacing=".04em">beyond a 10 fps budget</text><line x1="66.0" y1="344.0" x2="756.0" y2="344.0" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="56.0" y="348.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">0.10</text><line x1="66.0" y1="291.7" x2="756.0" y2="291.7" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="56.0" y="295.7" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">0.15</text><line x1="66.0" y1="239.3" x2="756.0" y2="239.3" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="56.0" y="243.3" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">0.20</text><line x1="66.0" y1="187.0" x2="756.0" y2="187.0" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="56.0" y="191.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">0.25</text><line x1="66.0" y1="134.7" x2="756.0" y2="134.7" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="56.0" y="138.7" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">0.30</text><line x1="66.0" y1="82.3" x2="756.0" y2="82.3" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="56.0" y="86.3" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">0.35</text><line x1="66.0" y1="30.0" x2="756.0" y2="30.0" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="56.0" y="34.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">0.40</text><text x="131.5" y="364.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">50</text><text x="258.8" y="364.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">100</text><text x="386.0" y="364.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">200</text><text x="554.3" y="364.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">500</text><text x="681.6" y="364.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">1000</text><text x="56.0" y="18.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">REC (Spearman ρ)</text><text x="756.0" y="384.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">latency per frame (ms, log scale)</text><circle cx="131.5" cy="294.8" r="5" fill="var(--paper)" stroke="var(--ink-soft)" stroke-width="1.6"/><text x="119.5" y="298.8" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" fill="var(--ink-soft)" text-anchor="end" font-weight="400" letter-spacing=".04em">Inverse-gradient</text><circle cx="131.5" cy="224.7" r="5" fill="var(--paper)" stroke="var(--ink-soft)" stroke-width="1.6"/><text x="119.5" y="228.7" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" fill="var(--ink-soft)" text-anchor="end" font-weight="400" letter-spacing=".04em">Depth-error proxy</text><circle cx="683.0" cy="165.0" r="5" fill="var(--paper)" stroke="var(--ink-soft)" stroke-width="1.6"/><text x="671.0" y="153.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" fill="var(--ink-soft)" text-anchor="end" font-weight="400" letter-spacing=".04em">MC dropout, 20×</text><circle cx="334.4" cy="131.5" r="11" fill="var(--ink-soft)" stroke="none" stroke-width="0"/><circle cx="334.4" cy="131.5" r="11" fill="none" stroke="var(--ink-soft)" stroke-width="1"/><circle cx="334.4" cy="131.5" r="8" fill="var(--paper)" stroke="var(--ink-soft)" stroke-width="1.6"/><text x="348.4" y="135.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" fill="var(--ink-soft)" text-anchor="start" font-weight="400" letter-spacing=".04em">Deep ensemble, 3×</text><path d="M 133.0 52.4 L 141.0 60.4 L 133.0 68.4 L 125.0 60.4 Z" fill="var(--trust)" stroke="none" stroke-width="0"/><text x="147.0" y="64.4" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="12" fill="var(--trust)" text-anchor="start" font-weight="600" letter-spacing=".04em">Learned R̂, 1×</text><text x="66.0" y="388.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">marker size encodes weight memory · single Tesla T4, 352×1216</text></svg></div>
+      <figcaption><b>Figure 6 — The price of confidence</b>
+        Sampling-based estimators buy their ranking quality with forward passes. On the same Tesla T4 that runs R³DC at 19.8 fps, a 20-sample Monte-Carlo estimate takes roughly a second per frame and a three-model ensemble triples weight memory — both while returning RBS = 0, because neither re-enters the prediction path.
+      </figcaption>
+    </figure>
+
+    <div class="tbl">
+      <div class="tbl-cap"><h3>Aerial · VisDrone and Drone-Videos</h3><span class="src">Table 8 · synthetic ground truth — read §5.1 before citing</span></div>
+      <div class="scroller">
+        <table style="min-width:600px">
+          <thead><tr><th>Method</th><th>Params</th><th>VisDrone RMSE ↓</th><th>δ₁ ↑</th><th>Drone-Videos RMSE ↓</th><th>δ₁ ↑</th></tr></thead>
+          <tbody>
+            <tr><td>Bilinear interpolation</td><td class="na">—</td><td>9.74 m</td><td>0.241</td><td>2.31 m</td><td>0.412</td></tr>
+            <tr><td>CSPN++ ⋆</td><td>17.4 M</td><td>5.18 m</td><td>0.631</td><td>1.44 m</td><td>0.573</td></tr>
+            <tr><td>NLSPN ⋆</td><td>26.8 M</td><td>4.91 m</td><td>0.664</td><td>1.37 m</td><td>0.591</td></tr>
+            <tr><td>CompletionFormer ⋆</td><td>12.7 M</td><td>4.34 m</td><td>0.712</td><td>1.21 m</td><td>0.634</td></tr>
+            <tr class="ours"><td>R³DC+ / R³DC</td><td>11.22 M / 1.47 M</td><td>2.33 m</td><td>0.928</td><td>0.67 m</td><td>0.847</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="tfoot">Two qualifications, both material. The reference depth is synthesised, so these numbers measure agreement with our own generation procedure rather than real-world aerial accuracy. And the advantage may partly reflect an inductive bias induced by the smooth aerial prior, which is compatible with the regularisation this architecture imposes. The prior is frame-invariant over 95.9% of the pixel variance of D and statistically independent of the RGB image — image content enters only through anchor placement — so these benchmarks cannot test RGB guidance at all.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ ABLATIONS ══════════════ -->
+<section class="sec band" id="ablation">
+  <div class="wrap">
+    <div class="sec-head"><span class="mark">§6 · Ablations</span><h2>One factor at a time, on the diagnostic protocol.</h2></div>
+    <p class="lede">All ablations use KITTI-uni at epoch 8 with the full 1.95 M configuration as the reference. Values are validation RMSE in metres and are not comparable with the millimetre-scale test results above.</p>
+
+    <div class="cols wide" style="margin-top:30px">
+      <figure class="fig reveal" style="margin-top:0">
+        <div class="plot"><svg viewBox="0 0 780 470" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Architecture ablation deltas" class="chart"><line x1="210.0" y1="24.0" x2="210.0" y2="424.0" stroke="var(--ink)" stroke-width="1"/><text x="198.0" y="16.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10" fill="var(--trust)" text-anchor="end" font-weight="600" letter-spacing=".04em">full model · 0.240 m</text><line x1="380.0" y1="24.0" x2="380.0" y2="424.0" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="380.0" y="444.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">+0.05</text><line x1="550.0" y1="24.0" x2="550.0" y2="424.0" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="550.0" y="444.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">+0.10</text><line x1="720.0" y1="24.0" x2="720.0" y2="424.0" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="720.0" y="444.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">+0.15</text><rect x="210.0" y="39.5" width="469.2" height="20.5" fill="var(--doubt)" opacity="0.38" rx="1"/><text x="198.0" y="53.7" font-family="Source Serif 4, serif" font-size="12" fill="var(--ink-soft)" text-anchor="end" font-weight="400" letter-spacing="0">RGB only, single stream</text><text x="688.2" y="53.7" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.138</text><rect x="210.0" y="78.9" width="343.4" height="20.5" fill="var(--doubt)" opacity="0.38" rx="1"/><text x="198.0" y="93.1" font-family="Source Serif 4, serif" font-size="12" fill="var(--ink-soft)" text-anchor="end" font-weight="400" letter-spacing="0">depth only, single stream</text><text x="562.4" y="93.1" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.101</text><rect x="210.0" y="118.3" width="241.4" height="20.5" fill="var(--doubt)" opacity="0.78" rx="1"/><text x="198.0" y="132.5" font-family="Source Serif 4, serif" font-size="12" fill="var(--ink-soft)" text-anchor="end" font-weight="400" letter-spacing="0">no CSPN++ refinement</text><text x="460.4" y="132.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.071</text><rect x="210.0" y="157.7" width="180.2" height="20.5" fill="var(--doubt)" opacity="0.78" rx="1"/><text x="198.0" y="171.9" font-family="Source Serif 4, serif" font-size="12" fill="var(--ink-soft)" text-anchor="end" font-weight="400" letter-spacing="0">no cross-modal attention</text><text x="399.2" y="171.9" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.053</text><rect x="210.0" y="197.1" width="170.0" height="20.5" fill="var(--doubt)" opacity="0.38" rx="1"/><text x="198.0" y="211.3" font-family="Source Serif 4, serif" font-size="12" fill="var(--ink-soft)" text-anchor="end" font-weight="400" letter-spacing="0">dual stream, no CMA</text><text x="389.0" y="211.3" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.050</text><rect x="210.0" y="236.5" width="112.2" height="20.5" fill="var(--doubt)" opacity="0.78" rx="1"/><text x="198.0" y="250.7" font-family="Source Serif 4, serif" font-size="12" fill="var(--ink-soft)" text-anchor="end" font-weight="400" letter-spacing="0">no deformable conv.</text><text x="331.2" y="250.7" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.033</text><rect x="210.0" y="275.9" width="71.4" height="20.5" fill="var(--doubt)" opacity="0.78" rx="1"/><text x="198.0" y="290.1" font-family="Source Serif 4, serif" font-size="12" fill="var(--ink-soft)" text-anchor="end" font-weight="400" letter-spacing="0">no transformer bottleneck</text><text x="290.4" y="290.1" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.021</text><rect x="210.0" y="315.3" width="61.2" height="20.5" fill="var(--doubt)" opacity="0.78" rx="1"/><text x="198.0" y="329.5" font-family="Source Serif 4, serif" font-size="12" fill="var(--ink-soft)" text-anchor="end" font-weight="400" letter-spacing="0">no EMA at inference</text><text x="280.2" y="329.5" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.018</text><rect x="210.0" y="354.7" width="37.4" height="20.5" fill="var(--doubt)" opacity="0.78" rx="1"/><text x="198.0" y="368.9" font-family="Source Serif 4, serif" font-size="12" fill="var(--ink-soft)" text-anchor="end" font-weight="400" letter-spacing="0">no CBAM</text><text x="256.4" y="368.9" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.011</text><rect x="210.0" y="394.1" width="23.8" height="20.5" fill="var(--doubt)" opacity="0.78" rx="1"/><text x="198.0" y="408.3" font-family="Source Serif 4, serif" font-size="12" fill="var(--ink-soft)" text-anchor="end" font-weight="400" letter-spacing="0">no DropPath</text><text x="242.8" y="408.3" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.007</text><text x="720.0" y="460.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">Δ validation RMSE (m) · KITTI-uni, epoch 8</text><rect x="210.0" y="446.0" width="12.0" height="9.0" fill="var(--doubt)" opacity="0.78" rx="0"/><text x="228.0" y="454.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">component removed</text><rect x="360.0" y="446.0" width="12.0" height="9.0" fill="var(--doubt)" opacity="0.38" rx="0"/><text x="378.0" y="454.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">encoder configuration</text></svg></div>
+        <figcaption><b>Figure 7 — Architecture ablation</b>
+          Removing CSPN++ refinement produces the largest single-component degradation, confirming that the coarse prediction alone cannot recover fine-scale structure. Replacing cross-modal fusion with a plain dual-stream configuration costs 0.050 m against 0.053 m for removing attention entirely, so most of the gain is attributable to cross-modal interaction rather than stream separation. RGB-only degrades furthest — the absence of sparse metric measurements to anchor the prediction.
+        </figcaption>
+      </figure>
+      <div>
+        <figure class="fig reveal" style="margin-top:0">
+          <div class="plot"><svg viewBox="0 0 380 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Effect of propagation step count" class="chart"><line x1="54.0" y1="176.0" x2="360.0" y2="176.0" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="46.0" y="180.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">0.240</text><line x1="54.0" y1="126.0" x2="360.0" y2="126.0" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="46.0" y="130.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">0.250</text><line x1="54.0" y1="76.0" x2="360.0" y2="76.0" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="46.0" y="80.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">0.260</text><line x1="54.0" y1="26.0" x2="360.0" y2="26.0" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="46.0" y="30.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">0.270</text><polyline points="84.6,61.0 145.8,116.0 237.6,176.0 329.4,171.0" fill="none" stroke="var(--ink-soft)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="84.6" cy="61.0" r="4" fill="var(--paper)" stroke="var(--ink-soft)" stroke-width="2"/><text x="84.6" y="224.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">T=1</text><circle cx="145.8" cy="116.0" r="4" fill="var(--paper)" stroke="var(--ink-soft)" stroke-width="2"/><text x="145.8" y="224.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">T=3</text><circle cx="237.6" cy="176.0" r="5" fill="var(--trust)" stroke="none" stroke-width="2"/><text x="237.6" y="224.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--trust)" text-anchor="middle" font-weight="600" letter-spacing=".04em">T=6</text><circle cx="329.4" cy="171.0" r="4" fill="var(--paper)" stroke="var(--ink-soft)" stroke-width="2"/><text x="329.4" y="224.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">T=9</text><text x="54.0" y="16.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">val RMSE (m)</text><text x="360.0" y="240.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">returns saturate at six steps</text></svg></div>
+          <figcaption><b>Figure 8 — Propagation depth</b>
+            Going from T = 6 to T = 9 changes RMSE by 0.001 m while adding roughly 50% refinement compute — within plausible seed variance, so we draw no conclusion from it.
+          </figcaption>
+        </figure>
+        <div class="tbl" style="margin-top:22px">
+          <div class="tbl-cap"><h3>CMA token budget</h3><span class="src">Table 17</span></div>
+          <div class="scroller">
+            <table style="min-width:0">
+              <thead><tr><th>N<sub>max</sub></th><th>128</th><th>256</th><th>512</th><th>1024</th></tr></thead>
+              <tbody>
+                <tr><td>Val RMSE (m)</td><td>0.264</td><td>0.248</td><td class="best">0.240</td><td>0.239</td></tr>
+                <tr><td>Peak GPU (GB)</td><td>3.1</td><td>5.2</td><td class="best">9.4</td><td>16.2</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="tfoot">512 is the accuracy–memory knee: doubling it buys 0.001 m for 1.7× peak memory, halving it costs 0.024 m because the smaller budget cannot represent fine depth discontinuities.</p>
+        </div>
+      </div>
+    </div>
+
+    <figure class="fig reveal">
+      <div class="plot"><svg viewBox="0 0 780 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Robustness to anchor density" class="chart"><rect x="62.0" y="32.0" width="113.2" height="308.0" fill="var(--doubt)" opacity="0.06" rx="0"/><text x="68.0" y="330.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--doubt)" text-anchor="start" font-weight="400" letter-spacing=".04em">δ₁ < 0.53 — inferring, not completing</text><line x1="62.0" y1="325.3" x2="714.0" y2="325.3" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="52.0" y="329.3" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">0.5</text><line x1="62.0" y1="252.0" x2="714.0" y2="252.0" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="52.0" y="256.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">1.0</text><line x1="62.0" y1="178.7" x2="714.0" y2="178.7" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="52.0" y="182.7" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">1.5</text><line x1="62.0" y1="105.3" x2="714.0" y2="105.3" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="52.0" y="109.3" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">2.0</text><line x1="62.0" y1="32.0" x2="714.0" y2="32.0" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="52.0" y="36.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">2.5</text><text x="724.0" y="318.3" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--trust)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.4</text><text x="724.0" y="267.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--trust)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.5</text><text x="724.0" y="215.7" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--trust)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.6</text><text x="724.0" y="164.3" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--trust)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.7</text><text x="724.0" y="113.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--trust)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.8</text><text x="724.0" y="61.7" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--trust)" text-anchor="start" font-weight="400" letter-spacing=".04em">0.9</text><line x1="294.9" y1="32.0" x2="294.9" y2="340.0" stroke="var(--ink)" stroke-width="1" stroke-dasharray="4 3"/><text x="301.9" y="46.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--ink)" text-anchor="start" font-weight="400" letter-spacing=".04em">training density</text><text x="84.8" y="360.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">0.5%</text><text x="175.2" y="360.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">1%</text><text x="265.7" y="360.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">2%</text><text x="385.3" y="360.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">5%</text><text x="475.8" y="360.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">10%</text><text x="685.9" y="360.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">50%</text><polyline points="84.8,59.9 175.2,131.7 265.7,188.9 385.3,263.7 475.8,291.6 685.9,316.5" fill="none" stroke="var(--doubt)" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/><polyline points="84.8,309.2 175.2,247.6 265.7,191.1 385.3,124.4 475.8,88.5 685.9,52.5" fill="none" stroke="var(--trust)" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="84.8" cy="59.9" r="4" fill="var(--paper)" stroke="var(--doubt)" stroke-width="2"/><circle cx="175.2" cy="131.7" r="4" fill="var(--paper)" stroke="var(--doubt)" stroke-width="2"/><circle cx="265.7" cy="188.9" r="4" fill="var(--paper)" stroke="var(--doubt)" stroke-width="2"/><circle cx="385.3" cy="263.7" r="4" fill="var(--paper)" stroke="var(--doubt)" stroke-width="2"/><circle cx="475.8" cy="291.6" r="4" fill="var(--paper)" stroke="var(--doubt)" stroke-width="2"/><circle cx="685.9" cy="316.5" r="4" fill="var(--paper)" stroke="var(--doubt)" stroke-width="2"/><circle cx="84.8" cy="309.2" r="4" fill="var(--trust)" stroke="none" stroke-width="0"/><circle cx="175.2" cy="247.6" r="4" fill="var(--trust)" stroke="none" stroke-width="0"/><circle cx="265.7" cy="191.1" r="4" fill="var(--trust)" stroke="none" stroke-width="0"/><circle cx="385.3" cy="124.4" r="4" fill="var(--trust)" stroke="none" stroke-width="0"/><circle cx="475.8" cy="88.5" r="4" fill="var(--trust)" stroke="none" stroke-width="0"/><circle cx="685.9" cy="52.5" r="4" fill="var(--trust)" stroke="none" stroke-width="0"/><text x="52.0" y="20.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--doubt)" text-anchor="start" font-weight="600" letter-spacing=".04em">RMSE (m)</text><text x="724.0" y="20.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--trust)" text-anchor="start" font-weight="600" letter-spacing=".04em">δ₁</text><text x="714.0" y="388.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">evaluation anchor density · fixed Drone-Videos checkpoint</text></svg></div>
+      <figcaption><b>Figure 9 — Robustness to anchor density</b>
+        A fixed Drone-Videos checkpoint trained at 2.5% density, evaluated across two orders of magnitude of sparsity. Reducing density 100× raises RMSE by only 4.1× — strongly sub-linear, which we attribute to the sparse-anchor loss term pinning the metric scale even when few measurements survive. Below 1% density δ₁ falls under 0.53 and the model should be read as inferring depth rather than completing it.
+      </figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ══════════════ NEGATIVE RESULT ══════════════ -->
+<section class="sec invert" id="inversion">
+  <div class="wrap">
+    <div class="sec-head"><span class="mark">§5.1 · Negative result</span><h2>On synthetic ground truth, REC inverts — and it is the target's fault.</h2></div>
+    <p class="lede">On VisDrone and Drone-Videos, REC is negative throughout training. Read naively, that is the worst failure a confidence-aware system can have: most certain exactly where it is most wrong. It is not what is happening, and the distinction matters beyond this paper.</p>
+
+    <div class="cols" style="margin-top:34px">
+      <div>
+        <p class="small">The error measured against a synthesised target carries the generator's own deviation from reality:</p>
+        <div class="eq">
+          ε<sub>pred</sub> = |d̂ − d<sub>real</sub>| &nbsp;+&nbsp; |d<sub>real</sub> − d<sub>synth</sub>| <span class="c">(Eq. 24)</span><br>
+          <span class="c">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;model error&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;GT noise η</span>
+        </div>
+        <p class="small">The aerial prior is smooth by construction, so η is largest at object boundaries and surface discontinuities — precisely the pixels where the model correctly assigns low reliability. When η dominates the model-error term, low-reliability pixels exhibit high measured error even where the prediction itself is accurate, and the rank correlation inverts.</p>
+        <p class="small">Two observations rule out the alternative explanation. The inversion <em class="k">shrinks</em> monotonically as the model fits the prior better; overconfidence would deepen it. And the same head, trained identically, yields +0.371 on NYU and +0.380 on KITTI.</p>
+        <p class="small">Note also that η does not come from the additive per-pixel noise term, which is spatially white. It arises because the prior's base, lateral and object components are smooth by construction and therefore deviate most from real geometry exactly at discontinuities.</p>
+      </div>
+      <div class="callout">
+        <span class="eyebrow">Methodological consequence</span>
+        <h3 style="margin-top:10px">Reliability metrics are interpretable only when the ground-truth noise floor is uncorrelated with the model's own uncertainty.</h3>
+        <p class="small" style="margin-top:14px;color:var(--ink)">Synthetic depth rarely guarantees that. We therefore treat every aerial RADI value in this paper as provisional, and all reliability conclusions rest on KITTI and NYU alone.</p>
+        <p class="small" style="color:var(--ink)">This bound applies to our own benchmarks first. It also applies to any confidence-aware depth evaluation performed on simulated data.</p>
+        <p class="note" style="margin-top:18px;color:var(--doubt)">Proxy validation against DublinCity aerial LiDAR over 30 frames: MAE 1.4 m, about 7% of mean depth, Pearson r = 0.81. Structurally reasonable at the scale of ground gradient, terrain undulation and building footprints; poor for specular surfaces, sensor-specific artefacts, camera roll beyond 60° and moving objects.</p>
+      </div>
+    </div>
+
+    <div class="fig-pair" style="margin-top:34px">
+      <figure class="fig reveal" style="margin-top:0">
+        <div class="plot"><svg viewBox="0 0 780 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="REC per epoch on VisDrone" class="chart"><rect x="60.0" y="38.9" width="696.0" height="249.1" fill="var(--doubt)" opacity="0.07" rx="0"/><line x1="60.0" y1="38.9" x2="756.0" y2="38.9" stroke="var(--ink)" stroke-width="1"/><text x="50.0" y="42.9" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">0.0</text><line x1="60.0" y1="83.4" x2="756.0" y2="83.4" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="50.0" y="87.4" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">-0.1</text><line x1="60.0" y1="127.9" x2="756.0" y2="127.9" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="50.0" y="131.9" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">-0.2</text><line x1="60.0" y1="172.3" x2="756.0" y2="172.3" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="50.0" y="176.3" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">-0.3</text><line x1="60.0" y1="216.8" x2="756.0" y2="216.8" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="50.0" y="220.8" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">-0.4</text><line x1="60.0" y1="261.3" x2="756.0" y2="261.3" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="50.0" y="265.3" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">-0.5</text><text x="60.0" y="308.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">1</text><text x="206.5" y="308.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">5</text><text x="389.7" y="308.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">10</text><text x="572.8" y="308.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">15</text><text x="756.0" y="308.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">20</text><polyline points="60.0,194.6 96.6,221.7 133.3,237.7 169.9,260.4 206.5,264.9 243.2,185.7 279.8,85.6 316.4,151.0 353.1,157.7 389.7,114.1 426.3,193.7 462.9,138.5 499.6,162.1 536.2,167.5 572.8,162.1 609.5,135.4 646.1,153.7 682.7,105.2 719.4,146.1 756.0,122.1" fill="none" stroke="var(--doubt)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="60.0" cy="194.6" r="3.4" fill="var(--doubt)" stroke="none" stroke-width="0"/><circle cx="96.6" cy="221.7" r="3.4" fill="var(--doubt)" stroke="none" stroke-width="0"/><circle cx="133.3" cy="237.7" r="3.4" fill="var(--doubt)" stroke="none" stroke-width="0"/><circle cx="169.9" cy="260.4" r="3.4" fill="var(--doubt)" stroke="none" stroke-width="0"/><circle cx="206.5" cy="264.9" r="3.4" fill="var(--doubt)" stroke="none" stroke-width="0"/><circle cx="243.2" cy="185.7" r="3.4" fill="var(--doubt)" stroke="none" stroke-width="0"/><circle cx="279.8" cy="85.6" r="3.4" fill="var(--doubt)" stroke="none" stroke-width="0"/><circle cx="316.4" cy="151.0" r="3.4" fill="var(--doubt)" stroke="none" stroke-width="0"/><circle cx="353.1" cy="157.7" r="3.4" fill="var(--doubt)" stroke="none" stroke-width="0"/><circle cx="389.7" cy="114.1" r="3.4" fill="var(--doubt)" stroke="none" stroke-width="0"/><circle cx="426.3" cy="193.7" r="3.4" fill="var(--doubt)" stroke="none" stroke-width="0"/><circle cx="462.9" cy="138.5" r="3.4" fill="var(--doubt)" stroke="none" stroke-width="0"/><circle cx="499.6" cy="162.1" r="3.4" fill="var(--doubt)" stroke="none" stroke-width="0"/><circle cx="536.2" cy="167.5" r="3.4" fill="var(--doubt)" stroke="none" stroke-width="0"/><circle cx="572.8" cy="162.1" r="3.4" fill="var(--doubt)" stroke="none" stroke-width="0"/><circle cx="609.5" cy="135.4" r="3.4" fill="var(--doubt)" stroke="none" stroke-width="0"/><circle cx="646.1" cy="153.7" r="3.4" fill="var(--doubt)" stroke="none" stroke-width="0"/><circle cx="682.7" cy="105.2" r="3.4" fill="var(--doubt)" stroke="none" stroke-width="0"/><circle cx="719.4" cy="146.1" r="3.4" fill="var(--doubt)" stroke="none" stroke-width="0"/><circle cx="756.0" cy="122.1" r="3.4" fill="var(--doubt)" stroke="none" stroke-width="0"/><circle cx="682.7" cy="105.2" r="8" fill="none" stroke="var(--trust)" stroke-width="2"/><text x="672.7" y="91.2" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10" fill="var(--trust)" text-anchor="end" font-weight="600" letter-spacing=".04em">best ckpt · −0.149</text><text x="216.5" y="280.9" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10" fill="var(--doubt)" text-anchor="start" font-weight="400" letter-spacing=".04em">worst · −0.508</text><text x="50.0" y="18.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">REC (Spearman ρ) — VisDrone, synthetic ground truth</text><text x="756.0" y="328.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">training epoch</text><text x="68.0" y="66.2" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="9.5" fill="var(--doubt)" text-anchor="start" font-weight="400" letter-spacing=".04em">inverted region</text></svg></div>
+        <figcaption><b>Figure 10a — REC per epoch, VisDrone</b>
+          Negative throughout, but improving in magnitude from −0.508 at epoch 5 to −0.149 at the selected checkpoint. The epoch-11 excursion is a cosine warm-restart transient, recovered within one epoch.
+        </figcaption>
+      </figure>
+      <figure class="fig reveal" style="margin-top:0">
+        <div class="plot"><svg viewBox="0 0 780 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="REC against validation RMSE" class="chart"><line x1="60.0" y1="38.9" x2="756.0" y2="38.9" stroke="var(--ink)" stroke-width="1"/><text x="50.0" y="42.9" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">0.0</text><line x1="60.0" y1="83.4" x2="756.0" y2="83.4" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="50.0" y="87.4" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">-0.1</text><line x1="60.0" y1="127.9" x2="756.0" y2="127.9" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="50.0" y="131.9" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">-0.2</text><line x1="60.0" y1="172.3" x2="756.0" y2="172.3" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="50.0" y="176.3" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">-0.3</text><line x1="60.0" y1="216.8" x2="756.0" y2="216.8" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="50.0" y="220.8" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">-0.4</text><line x1="60.0" y1="261.3" x2="756.0" y2="261.3" stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4"/><text x="50.0" y="265.3" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">-0.5</text><text x="83.2" y="308.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">2</text><text x="176.0" y="308.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">4</text><text x="268.8" y="308.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">6</text><text x="361.6" y="308.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">8</text><text x="454.4" y="308.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">10</text><text x="547.2" y="308.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">12</text><text x="640.0" y="308.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">14</text><text x="732.8" y="308.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="middle" font-weight="400" letter-spacing=".04em">16</text><polyline points="73.9,117.7 742.1,260.7" fill="none" stroke="var(--ink)" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5 4"/><circle cx="709.1" cy="194.6" r="5" fill="var(--doubt)" stroke="var(--paper)" stroke-width="1.2"/><circle cx="709.1" cy="194.6" r="5" fill="none" stroke="var(--trust)" stroke-width="0"/><circle cx="636.8" cy="221.7" r="5" fill="var(--doubt)" stroke="var(--paper)" stroke-width="1.2"/><circle cx="636.8" cy="221.7" r="5" fill="none" stroke="var(--trust)" stroke-width="0"/><circle cx="563.4" cy="237.7" r="5" fill="var(--doubt)" stroke="var(--paper)" stroke-width="1.2"/><circle cx="563.4" cy="237.7" r="5" fill="none" stroke="var(--trust)" stroke-width="0"/><circle cx="595.9" cy="260.4" r="5" fill="var(--doubt)" stroke="var(--paper)" stroke-width="1.2"/><circle cx="595.9" cy="260.4" r="5" fill="none" stroke="var(--trust)" stroke-width="0"/><circle cx="513.3" cy="264.9" r="5" fill="var(--doubt)" stroke="var(--paper)" stroke-width="1.2"/><circle cx="513.3" cy="264.9" r="5" fill="none" stroke="var(--trust)" stroke-width="0"/><circle cx="366.7" cy="185.7" r="5" fill="var(--doubt)" stroke="var(--paper)" stroke-width="1.2"/><circle cx="366.7" cy="185.7" r="5" fill="none" stroke="var(--trust)" stroke-width="0"/><circle cx="255.8" cy="85.6" r="5" fill="var(--doubt)" stroke="var(--paper)" stroke-width="1.2"/><circle cx="255.8" cy="85.6" r="5" fill="none" stroke="var(--trust)" stroke-width="0"/><circle cx="202.0" cy="151.0" r="5" fill="var(--doubt)" stroke="var(--paper)" stroke-width="1.2"/><circle cx="202.0" cy="151.0" r="5" fill="none" stroke="var(--trust)" stroke-width="0"/><circle cx="196.4" cy="157.7" r="5" fill="var(--doubt)" stroke="var(--paper)" stroke-width="1.2"/><circle cx="196.4" cy="157.7" r="5" fill="none" stroke="var(--trust)" stroke-width="0"/><circle cx="144.0" cy="114.1" r="5" fill="var(--doubt)" stroke="var(--paper)" stroke-width="1.2"/><circle cx="144.0" cy="114.1" r="5" fill="none" stroke="var(--trust)" stroke-width="0"/><circle cx="353.2" cy="193.7" r="5" fill="var(--doubt)" stroke="var(--paper)" stroke-width="1.2"/><circle cx="353.2" cy="193.7" r="5" fill="none" stroke="var(--trust)" stroke-width="0"/><circle cx="161.2" cy="138.5" r="5" fill="var(--doubt)" stroke="var(--paper)" stroke-width="1.2"/><circle cx="161.2" cy="138.5" r="5" fill="none" stroke="var(--trust)" stroke-width="0"/><circle cx="196.4" cy="162.1" r="5" fill="var(--doubt)" stroke="var(--paper)" stroke-width="1.2"/><circle cx="196.4" cy="162.1" r="5" fill="none" stroke="var(--trust)" stroke-width="0"/><circle cx="226.6" cy="167.5" r="5" fill="var(--doubt)" stroke="var(--paper)" stroke-width="1.2"/><circle cx="226.6" cy="167.5" r="5" fill="none" stroke="var(--trust)" stroke-width="0"/><circle cx="234.9" cy="162.1" r="5" fill="var(--doubt)" stroke="var(--paper)" stroke-width="1.2"/><circle cx="234.9" cy="162.1" r="5" fill="none" stroke="var(--trust)" stroke-width="0"/><circle cx="222.4" cy="135.4" r="5" fill="var(--doubt)" stroke="var(--paper)" stroke-width="1.2"/><circle cx="222.4" cy="135.4" r="5" fill="none" stroke="var(--trust)" stroke-width="0"/><circle cx="204.3" cy="153.7" r="5" fill="var(--doubt)" stroke="var(--paper)" stroke-width="1.2"/><circle cx="204.3" cy="153.7" r="5" fill="none" stroke="var(--trust)" stroke-width="0"/><circle cx="98.5" cy="105.2" r="5" fill="var(--doubt)" stroke="var(--paper)" stroke-width="1.2"/><circle cx="98.5" cy="105.2" r="5" fill="none" stroke="var(--trust)" stroke-width="0"/><circle cx="157.0" cy="146.1" r="5" fill="var(--doubt)" stroke="var(--paper)" stroke-width="1.2"/><circle cx="157.0" cy="146.1" r="5" fill="none" stroke="var(--trust)" stroke-width="0"/><circle cx="142.6" cy="122.1" r="5" fill="var(--doubt)" stroke="var(--paper)" stroke-width="1.2"/><circle cx="142.6" cy="122.1" r="5" fill="none" stroke="var(--trust)" stroke-width="0"/><text x="748.0" y="48.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" fill="var(--ink)" text-anchor="end" font-weight="600" letter-spacing=".04em">Pearson r = −0.82</text><text x="50.0" y="18.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="start" font-weight="400" letter-spacing=".04em">REC (Spearman ρ)</text><text x="756.0" y="328.0" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="10.5" fill="var(--ink-faint)" text-anchor="end" font-weight="400" letter-spacing=".04em">validation RMSE (m) — the fit improves leftward</text></svg></div>
+        <figcaption><b>Figure 10b — The inversion shrinks as the fit improves</b>
+          The same epochs against validation RMSE. If the model were simply overconfident, fitting the prior more closely would deepen the inversion rather than reduce it.
+        </figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ DISCUSSION / LIMITS ══════════════ -->
+<section class="sec" id="limits">
+  <div class="wrap">
+    <div class="sec-head"><span class="mark">§9 · §10</span><h2>What generalises, what does not, and what we would not claim.</h2></div>
+
+    <div class="cols" style="margin-top:26px">
+      <div>
+        <h3>Transfers unchanged</h3>
+        <p class="small">The components that hold across domains address sparsity and scale rather than appearance: log normalisation, the sparse-anchor term and SILog, which together let one set of loss weights cover an 8× range in depth.</p>
+        <h3 style="margin-top:24px">Domain-dependent</h3>
+        <p class="small">The appearance-driven components. Cross-modal attention contributes most where RGB carries usable texture and least on the aerial prior, whose surfaces are smooth by construction. Deformable convolution matters more as anchor density falls, which is why the 0.1% indoor pattern benefits more than the 5% KITTI pattern. A practitioner porting R³DC to a new sensor should expect the losses to transfer and the fusion hyperparameters to need attention.</p>
+        <h3 style="margin-top:24px">Order of operations for a new deployment</h3>
+        <p class="small">Fix d<sub>min</sub>, d<sub>max</sub> and anchor density first — they determine log normalisation and dominate everything else. Keep the loss weights. Tune N<sub>max</sub> against the memory budget before touching anything else in the encoder. And validate reliability with RADI on real ground truth from the target sensor before letting any downstream module consume R̂. That last point is not a formality.</p>
+      </div>
+      <div>
+        <h3>Threats to validity</h3>
+        <ul class="list" style="margin-top:12px">
+          <li><b>Baselines</b><span>CSPN++, NLSPN and CompletionFormer were retrained by us on NYU and on the aerial distribution using published recipes without per-dataset hyperparameter search. Read them as competent rather than optimal.</span></li>
+          <li><b>Seeds</b><span>Apart from the multi-seed study and the ensemble baseline, results come from one run per configuration. Differences of 0.001 m — notably T = 6 against T = 9 — sit within plausible seed variance and support no conclusion. The gate-substitution differences are an order of magnitude larger.</span></li>
+          <li><b>Offline masks</b><span>RADI's region masks are derived from ground truth, which makes it a diagnostic rather than an online monitor. Online regional analysis would need masks derived from observable inputs.</span></li>
+          <li><b>Generator bias</b><span>The aerial benchmarks measure fit to a generator we designed, which favours smooth solutions and therefore plausibly favours our model.</span></li>
+        </ul>
+        <h3 style="margin-top:30px">Limitations we name</h3>
+        <p class="small">Raw KITTI accuracy is not state of the art — GuideFormer and BP-Net are ahead by roughly 100–160 mm. Reliability is unsupervised, which slows calibration: REC took 18 epochs to move from −0.508 to −0.149 on VisDrone. It is estimated per frame with no temporal consistency. And the indoor variant is parameter-efficient to <em>train</em> but still requires the 94.6 M-parameter frozen backbone at inference, so its efficiency should not be read as end-to-end deployment efficiency.</p>
+        <p class="small">The most promising extension is a direct correctness loss. The gating pathway only supervises reliability where refinement can change the output, so in large homogeneous areas far from any anchor the gradient reaching R̂ is weak, and calibration there is inherited from the shared-feature coupling with σ̂ rather than learned.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ RESOURCES ══════════════ -->
+<section class="sec band" id="resources">
+  <div class="wrap">
+    <div class="sec-head"><span class="mark">Reproducibility</span><h2>Protocols, settings, and what to state when reporting RADI.</h2></div>
+
+    <div class="cols" style="margin-top:26px">
+      <div class="tbl" style="margin-top:0">
+        <div class="tbl-cap"><h3>Domain characteristics</h3><span class="src">Table 5</span></div>
+        <div class="scroller">
+          <table style="min-width:520px">
+            <thead><tr><th>Dataset</th><th>d<sub>min</sub></th><th>d<sub>max</sub></th><th>Viewpoint</th><th>ρ</th><th>GT source</th></tr></thead>
+            <tbody>
+              <tr><td>KITTI</td><td>0 m</td><td>80 m</td><td>near-horizontal</td><td>5%</td><td>Velodyne LiDAR</td></tr>
+              <tr><td>NYU Depth V2</td><td>0.001 m</td><td>10 m</td><td>arbitrary</td><td>0.1%</td><td>structured light</td></tr>
+              <tr><td>VisDrone</td><td>1 m</td><td>80 m</td><td>top-down</td><td>2.5%</td><td class="na">synthetic prior</td></tr>
+              <tr><td>Drone-Videos</td><td>0 m</td><td>50 m</td><td>bird's-eye</td><td>2.5%</td><td class="na">synthetic prior</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="tbl" style="margin-top:0">
+        <div class="tbl-cap"><h3>Per-dataset settings</h3><span class="src">Table 23 · shared: AdamW, wd 10⁻⁴, FP16, DropPath 0.1</span></div>
+        <div class="scroller">
+          <table style="min-width:560px">
+            <thead><tr><th>Setting</th><th>KITTI</th><th>VisDrone</th><th>Drone-Vid.</th><th>NYU</th></tr></thead>
+            <tbody>
+              <tr><td>Input H × W</td><td>352×1216</td><td>384×640</td><td>384×640</td><td>518×518</td></tr>
+              <tr><td>η₀</td><td>1e−4</td><td>1e−4</td><td>1e−4</td><td>5e−6</td></tr>
+              <tr><td>Epochs</td><td>8</td><td>20</td><td>10</td><td>10</td></tr>
+              <tr><td>Warm-up</td><td>none</td><td>5 ep</td><td>none</td><td>0.5 ep</td></tr>
+              <tr><td>Scheduler</td><td>CosWR</td><td>CosWR</td><td>none</td><td>Cosine</td></tr>
+              <tr><td>Base width B</td><td>64</td><td>64</td><td>32</td><td class="na">frozen ViT-S</td></tr>
+              <tr><td>Trainable params</td><td>1.95 M</td><td>11.22 M</td><td>1.47 M</td><td>16,642</td></tr>
+              <tr><td>GPU · wall-clock</td><td>T4 · 1.5 h</td><td>P100 · 4.4 h</td><td>T4 · 1.2 h</td><td>2×T4 · 10 h</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <p class="tfoot" style="margin-top:22px;max-width:none">Every result comes from a single code base with per-dataset configuration files. The definitions that most affect reproducibility are stated explicitly rather than left implicit: the two KITTI protocols, the depth space in which each RBS value is computed, the region-mask thresholds, the calibration binning (B<sub>cal</sub> = 15, τ = 0.10), and the synthetic aerial generator with its exact constants. Batch size is 4, and 11 for NYU. Augmentation is horizontal flip, colour jitter, gamma adjustment 𝒰(0.8, 1.2), 30% sparse dropout and 30% CutMix. Inference uses EMA weights throughout.</p>
+  </div>
+</section>
+
+<!-- ══════════════ CITE ══════════════ -->
+<section class="sec" id="cite">
+  <div class="wrap">
+    <div class="cols narrow">
+      <div>
+        <div class="sec-head" style="margin-bottom:8px"><span class="mark">Cite</span></div>
+        <h2 style="font-size:clamp(24px,2.6vw,32px)">BibTeX</h2>
+        <p class="small" style="margin-top:14px">If you use RADI, please state the configuration — B<sub>cal</sub> = 15, τ = 0.10 — and the depth space in which RBS was computed, so numbers stay comparable across papers.</p>
+        <p class="note">The implementation, configuration files, dataset adapters and the synthetic aerial depth generator will be released publicly.</p>
+      </div>
+      <div>
+        <div class="bib">
+          <button class="copy" id="copyBtn" type="button">Copy</button>
+<pre id="bibtex">@article<span class="k">{mohammad2026r3dc,</span>
+  title   = {R{\textsuperscript{3}}DC: Knowing What to Revise --- Reliability-Aware
+             Depth Completion for Trustworthy Cross-Domain Sparse Perception},
+  author  = {Mohammad, Noor Islam S. and Bayaz{\i}t, Ulu{\u{g}}},
+  journal = {Preprint submitted to Elsevier},
+  year    = {2026}
+}
+
+@inproceedings<span class="k">{mohammad2026r3dcw,</span>
+  title     = {R{\textsuperscript{3}}DC: Reliability-Guided Reveal-to-Revise Depth
+               Completion for Cross-Domain Sparse Perception},
+  author    = {Mohammad, Noor Islam S. and Bayaz{\i}t, Ulu{\u{g}}},
+  booktitle = {CVPR 2026 Workshop on 3D Geometry Generation for Scientific Computing},
+  year      = {2026},
+  url       = {https://openreview.net/forum?id=odj32HFuaj}
+}</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <h4>Authors</h4>
+        <p style="margin:0 0 8px">Noor Islam S. Mohammad<br><span class="note"><a href="mailto:islam23@itu.edu.tr">islam23@itu.edu.tr</a> · ORCID 0009-0007-8823-6681</span></p>
+        <p style="margin:0">Uluğ Bayazıt<br><span class="note"><a href="mailto:ulugbayazit@itu.edu.tr">ulugbayazit@itu.edu.tr</a> · ORCID 0000-0003-4302-8516</span></p>
+        <p class="note" style="margin-top:12px">CRediT — N.I.S.M.: conceptualization, methodology, software, validation, formal analysis, investigation, data curation, visualization, writing. U.B.: methodology, supervision, review.</p>
+      </div>
+      <div>
+        <h4>Data &amp; code</h4>
+        <p class="small" style="margin:0">KITTI, NYU Depth V2, VisDrone and Drone-Videos are third-party datasets available from their original providers under their own licences. Geometric validation of the synthetic aerial prior uses DublinCity aerial LiDAR.</p>
+        <p class="small" style="margin-top:10px">This study involved no human participants, no animal experimentation and no personal data.</p>
+      </div>
+      <div>
+        <h4>Funding &amp; competing interests</h4>
+        <p class="small" style="margin:0">This research received no specific grant from any funding agency in the public, commercial, or not-for-profit sectors. The authors declare no known competing financial interests or personal relationships that could have influenced the work.</p>
+        <p class="note" style="margin-top:12px">Generative AI tools were used for language editing only — not for methodology, experiments, analysis, or conclusions.</p>
+      </div>
+    </div>
+    <div class="colophon">
+      <span>Istanbul Technical University · Sarıyer/Maslak 34467, Türkiye</span>
+      <span>Teal reads trusted, plum reads doubted — the scale the model predicts.</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ── gate demo · Table 16, verbatim ─────────────────── */
+  var V = [
+    { id:"A", rmse:0.311, rec:null, rbs:null, map:"none",
+      text:"<strong>No refinement at all.</strong> The coarse map D\u2080 straight out of the decoder. Every variant below is measured against this." },
+    { id:"B", rmse:0.260, rec:null, rbs:16.4, map:"none",
+      text:"<strong>Ungated CSPN++.</strong> Propagation with no reliability input \u2014 0.051 m of the gain, which any spatial-propagation refiner would obtain." },
+    { id:"C", rmse:0.259, rec:0.000, rbs:16.7, map:"uniform",
+      text:"<strong>A constant gate.</strong> R\u0302 \u2261 0.5 everywhere. Indistinguishable from no gate at all: the extra input channel, by itself, is worth nothing." },
+    { id:"D", rmse:0.272, rec:0.0, rbs:12.5, map:"shuffled",
+      text:"<strong>The same values, spatially permuted.</strong> Identical marginal distribution, destroyed correspondence \u2014 and now <em class='k'>worse than not gating</em>. A confidence map that is plausible on average but wrong per pixel is actively harmful." },
+    { id:"E", rmse:0.240, rec:0.380, rbs:22.8, map:"learned",
+      text:"<strong>The learned gate.</strong> Reliability is spatially organised \u2014 low near occlusion boundaries and textureless surfaces, high where the coarse estimate is already sound. Refinement is steered to where it is needed." }
+  ];
+  var LO = 0.230, HI = 0.320, COLS = 44, ROWS = 18;
+  var canvas = document.getElementById("field"), ctx = canvas.getContext("2d");
+  var base = [], shown = [], current = 4;
+
+  (function build(){
+    var blobs = [
+      {x:.18,y:.30,s:.20,a:-1.0},{x:.52,y:.62,s:.16,a:-0.9},{x:.80,y:.26,s:.22,a:-0.8},
+      {x:.35,y:.82,s:.13,a:-0.7},{x:.66,y:.13,s:.11,a:-0.6},
+      {x:.06,y:.82,s:.26,a:+0.9},{x:.94,y:.74,s:.24,a:+0.9},{x:.45,y:.20,s:.20,a:+0.7}
+    ];
+    for(var r=0;r<ROWS;r++) for(var c=0;c<COLS;c++){
+      var x=(c+0.5)/COLS, y=(r+0.5)/ROWS, v=0.58;
+      for(var i=0;i<blobs.length;i++){
+        var b=blobs[i], dx=x-b.x, dy=y-b.y;
+        v += b.a*Math.exp(-(dx*dx+dy*dy)/(2*b.s*b.s));
+      }
+      v += 0.05*Math.sin(11.3*x+7.1*y);
+      base.push(Math.max(0.04, Math.min(0.96, v)));
+    }
+  })();
+
+  function lerp(a,b,t){return a+(b-a)*t;}
+  function mix(a,b,t){return "rgb("+Math.round(lerp(a[0],b[0],t))+","+Math.round(lerp(a[1],b[1],t))+","+Math.round(lerp(a[2],b[2],t))+")";}
+  var DOUBT=[140,31,87], MID=[221,225,230], TRUST=[13,107,99];
+  function colour(v){ return v<0.5 ? mix(DOUBT,MID,v/0.5) : mix(MID,TRUST,(v-0.5)/0.5); }
+
+  function draw(vals){
+    var w=canvas.width/COLS, h=canvas.height/ROWS;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    for(var r=0;r<ROWS;r++) for(var c=0;c<COLS;c++){
+      ctx.fillStyle = colour(vals[r*COLS+c]);
+      ctx.fillRect(c*w, r*h, Math.ceil(w)+0.5, Math.ceil(h)+0.5);
+    }
+  }
+  function shuffle(src){
+    var a=src.slice();
+    for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1)),t=a[i];a[i]=a[j];a[j]=t;}
+    return a;
+  }
+
+  var elR=document.getElementById("roRmse"), elBar=document.getElementById("roBar"),
+      elRec=document.getElementById("roRec"), elRbs=document.getElementById("roRbs"),
+      elTxt=document.getElementById("roText"), elOff=document.getElementById("fieldOff");
+
+  function select(i){
+    current = i;
+    var v = V[i];
+    document.querySelectorAll(".picker button").forEach(function(b){
+      b.setAttribute("aria-pressed", String(Number(b.dataset.v)===i));
+    });
+    if(v.map==="none"){ elOff.classList.add("on"); shown = base.map(function(){return 0.5;}); }
+    else{
+      elOff.classList.remove("on");
+      shown = v.map==="uniform" ? base.map(function(){return 0.5;})
+            : v.map==="shuffled" ? shuffle(base) : base.slice();
+    }
+    draw(shown);
+    elR.innerHTML = v.rmse.toFixed(3)+"<small>m</small>";
+    elBar.style.width = Math.max(4, Math.min(100, (v.rmse-LO)/(HI-LO)*100))+"%";
+    elBar.className = v.id==="E" ? "good" : (v.id==="D" ? "bad" : "");
+    elRec.textContent = v.rec===null ? "—" : (v.rec>0?"+":"")+v.rec.toFixed(3)+(v.id==="D"?" (≈0)":"");
+    elRbs.textContent = v.rbs===null ? "—" : v.rbs.toFixed(1)+"%";
+    elTxt.innerHTML = v.text;
+  }
+  document.querySelectorAll(".picker button").forEach(function(b){
+    b.addEventListener("click", function(){ select(Number(b.dataset.v)); });
+  });
+
+  function resize(){
+    var w = canvas.clientWidth; if(!w) return;
+    var dpr = Math.min(window.devicePixelRatio||1, 2);
+    canvas.width = Math.round(w*dpr);
+    canvas.height = Math.round(w*0.41*dpr);
+    draw(shown.length ? shown : base);
+  }
+  var rt; window.addEventListener("resize", function(){ clearTimeout(rt); rt=setTimeout(resize,120); });
+  shown = base.slice(); resize(); select(4);
+
+  /* ── scroll progress + nav highlighting ─────────────── */
+  var bar = document.getElementById("progress");
+  var navLinks = Array.prototype.slice.call(document.querySelectorAll("#nav a"));
+  var targets = navLinks.map(function(a){ return document.querySelector(a.getAttribute("href")); }).filter(Boolean);
+
+  function onScroll(){
+    var h = document.documentElement;
+    var p = h.scrollTop / Math.max(1, h.scrollHeight - h.clientHeight);
+    bar.style.width = (p*100).toFixed(2)+"%";
+    var y = h.scrollTop + 120, active = null;
+    targets.forEach(function(t){ if(t.offsetTop <= y) active = t.id; });
+    navLinks.forEach(function(a){
+      a.setAttribute("aria-current", String(a.getAttribute("href") === "#"+active));
+    });
+  }
+  window.addEventListener("scroll", onScroll, {passive:true});
+  onScroll();
+
+  /* ── figure reveal ──────────────────────────────────── */
+  if(!reduce && "IntersectionObserver" in window){
+    var io = new IntersectionObserver(function(es){
+      es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add("in"); io.unobserve(e.target); } });
+    }, {rootMargin:"0px 0px -60px 0px", threshold:0.08});
+    document.querySelectorAll(".reveal").forEach(function(el){ io.observe(el); });
+  } else {
+    document.querySelectorAll(".reveal").forEach(function(el){ el.classList.add("in"); });
+  }
+
+  /* ── copy bibtex ────────────────────────────────────── */
+  var btn = document.getElementById("copyBtn");
+  btn.addEventListener("click", function(){
+    var text = document.getElementById("bibtex").innerText;
+    navigator.clipboard.writeText(text).then(function(){
+      btn.textContent = "Copied"; btn.classList.add("done");
+      setTimeout(function(){ btn.textContent="Copy"; btn.classList.remove("done"); }, 1800);
+    }, function(){ btn.textContent = "Select and copy"; });
+  });
+})();
+</script>
+</body>
+</html>
